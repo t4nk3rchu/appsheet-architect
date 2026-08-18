@@ -54,14 +54,30 @@ Required: `table`. Optional: `dataFilter` (row-level security filter), `updateMo
 - `viewType`: `table | deck | gallery | detail | map | calendar | chart | dashboard | form | onboarding | card`
 - `position`: `left most | left | center | right | right most | menu | ref`
 
-> **`position:"ref"` hijacks Ref column navigation — use it intentionally.**
-> AppSheet assigns `position:"ref"` views to Ref columns on the **same table** as the default drill-through target, replacing the system-generated view. If you add a new view on table `ORDERS` at `position:"ref"`, every Ref column pointing to `ORDERS` (in any other table) opens **your new view** instead of the auto-generated detail. This is usually wrong for secondary/filtered views.
+> **`position:"ref"` hijacks Ref column navigation — choose one of three patterns.**
 >
-> **Rule:** only use `position:"ref"` when the explicit goal is to **replace** the system-generated view for that table's Ref navigation. For any other new view on the same table — a filtered slice view, a report, a role-specific layout — use `position:"menu"` and control visibility with `showIf`. Common patterns:
-> - Hide from all nav but allow embedding in dashboards: `"showIf": "false"`
-> - Show only when navigated to from within another view: `"showIf": "CONTEXT(\"ViewType\") = \"detail\""`
-> - Show only for specific roles: `"showIf": "USERROLE() = \"Admin\""`
-> - Show only when embedded in a specific parent view: `"showIf": "CONTEXT(\"View\") = \"Trang chủ\""`
+> AppSheet assigns **every `position:"ref"` view on a table** as the default drill-through target for Ref columns pointing to that table — replacing the system-generated detail view. Adding a secondary view (chart, filtered report, role-specific layout) at `position:"ref"` silently breaks all Ref navigation for that table.
+>
+> Pick the right pattern based on user intent:
+>
+> **Pattern A — Replace the system view** (user explicitly wants a different default detail):
+> Use `position:"ref"`. The new view becomes the Ref drill-through for that table everywhere in the app.
+>
+> **Pattern B — Secondary nav view** (appears in the left nav / menu, visible to the user, but shouldn't hijack Ref):
+> Use `position:"menu"` and guard with `showIf`:
+> - Hide from nav but embeddable in dashboards: `"showIf": "false"`
+> - Show only when inside a detail drill: `"showIf": "CONTEXT(\"ViewType\") = \"detail\""`
+> - Show only from a specific parent view: `"showIf": "CONTEXT(\"View\") = \"Trang chủ\""`
+> - Show only for a role: `"showIf": "USERROLE() = \"Admin\""`
+>
+> **Pattern C — Dashboard/chart child view that should not appear in nav at all** (cleanest):
+> Create a **no-filter slice** on the table, name it descriptively (e.g. `CHART_CHI_PHI_VT`), and bind the view to the slice instead of the base table. Because the data source is a slice name (not the base table name), AppSheet will not treat it as a Ref navigation target. No `showIf` gymnastics needed; the view is invisible to nav by default.
+> ```json
+> { "op": "add_slice", "table": "CHI_TIẾT_PHIẾU_KHO", "name": "CHART_CHI_PHI_VT" },
+> { "op": "add_view", "name": "BC_Chi phí vật tư", "table": "CHART_CHI_PHI_VT",
+>   "viewType": "chart", "position": "ref", "chartType": "Col Series", "chartColumns": ["thành_tiền"] }
+> ```
+> **Decision tree:** user wants a dashboard child view or chart on a table that already has a system view → **Pattern C** (slice). User wants a conditional/role-gated nav item → **Pattern B** (menu + showIf). User wants to replace the default Ref drill-through → **Pattern A** (ref).
 
 - `sortBy`/`groupBy`: array of `{ "column": "col", "order": "Ascending" | "Descending" }` (default Ascending). On `set_view` these **append**.
 
