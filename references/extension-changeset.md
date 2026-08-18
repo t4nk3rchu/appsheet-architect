@@ -53,6 +53,16 @@ Required: `table`. Optional: `dataFilter` (row-level security filter), `updateMo
 `add_view` **requires** `name`, `viewType`, **and** `table` (the "For this data" source — a table **or a slice**) — **except dashboards** (which have no "For this data", so omit `table`). `set_view` **requires** `view` = the **exact, already-existing** view name (verify it against the live app; a wrong/nonexistent name fails with "Không mở được view / can't open view" and the change is dropped — auto-generated views are usually named after the **view**, which may differ from the table name). Optional: `position`, `groupAggregate`, `showIf`, `displayName`, `icon`, `sortBy`, `groupBy`, plus the view-type-specific fields below and the `properties` escape-hatch.
 - `viewType`: `table | deck | gallery | detail | map | calendar | chart | dashboard | form | onboarding | card`
 - `position`: `left most | left | center | right | right most | menu | ref`
+
+> **`position:"ref"` hijacks Ref column navigation — use it intentionally.**
+> AppSheet assigns `position:"ref"` views to Ref columns on the **same table** as the default drill-through target, replacing the system-generated view. If you add a new view on table `ORDERS` at `position:"ref"`, every Ref column pointing to `ORDERS` (in any other table) opens **your new view** instead of the auto-generated detail. This is usually wrong for secondary/filtered views.
+>
+> **Rule:** only use `position:"ref"` when the explicit goal is to **replace** the system-generated view for that table's Ref navigation. For any other new view on the same table — a filtered slice view, a report, a role-specific layout — use `position:"menu"` and control visibility with `showIf`. Common patterns:
+> - Hide from all nav but allow embedding in dashboards: `"showIf": "false"`
+> - Show only when navigated to from within another view: `"showIf": "CONTEXT(\"ViewType\") = \"detail\""`
+> - Show only for specific roles: `"showIf": "USERROLE() = \"Admin\""`
+> - Show only when embedded in a specific parent view: `"showIf": "CONTEXT(\"View\") = \"Trang chủ\""`
+
 - `sortBy`/`groupBy`: array of `{ "column": "col", "order": "Ascending" | "Descending" }` (default Ascending). On `set_view` these **append**.
 
 > **`groupBy` / `groupAggregate` are for `table` and `deck` views only — NOT charts.** They group rows and show an aggregate in the group header (`groupAggregate`: `SUM | AVERAGE | COUNT | MIN | MAX | …`, under the view's "View Options"). A **chart** has no "Group by" field — putting `groupBy`/`groupAggregate` on a chart is silently skipped ("Field chưa vào (kiểm tay)"). A chart aggregates via its **chart type** (see below), not `groupBy`.
