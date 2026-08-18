@@ -54,14 +54,14 @@ below ~2 s, so chasing sub-2 s is wasted effort — aim for 3–5 s and stop.
 |---|---|---|
 | **Audit / optimize / refactor an existing app** — "it's slow", "reduce sync", "scale it", "cut cost" | `references/audit-refactor.md` | Get a **Documentation export** and run `scripts/parse_appdoc.py` |
 | **Design a new app, table, or feature** from requirements | `references/design.md` | Model the data first — 80% of success is the data model |
+| **Look up an AppSheet formula/function or write an expression** | `references/expressions.md` | Consult the complete formula catalog with bilingual explanations, syntax, and performance notes |
 | **Choose or change the data source**, or **write Apps Script / bots** to offload work | `references/data-and-backend.md` | Locate the app on the scaling ladder |
-| **Review a single expression, virtual column, slice, or security filter** | `references/diagnostics.md` §Anti-patterns | Match it against the catalog, name the smell, give the fix |
+| **Review a single expression, virtual column, slice, or security filter** | `references/diagnostics.md` §Anti-patterns & `references/expressions.md` | Match it against the catalog, name the smell, give the fix |
 | **Produce or apply a changeset** for the AppSheet Assistant extension (user has it / wants "a JSON I can apply") | `references/extension-changeset.md` | Emit one strict-JSON `{"changes":[…]}` per that spec — don't ask the user to re-explain the format |
 
-**`references/diagnostics.md` is the shared knowledge base** — the sync/cost model
-in full, the ranked anti-pattern catalog (~40 smells with fixes), and every hard
-limit and threshold. All modes cite it. When you need the *why* or a specific
-number, it's there. Read the mode file for your task **plus** diagnostics.md.
+**`references/diagnostics.md` and `references/expressions.md` form the shared knowledge base** — the sync/cost model
+in full, the ranked anti-pattern catalog (~40 smells with fixes), every hard limit, and the complete AppSheet function catalog.
+All modes cite them. Read the mode file for your task **plus** diagnostics.md and expressions.md when working with expressions.
 
 ## Reviewing an expression right now (the fast path)
 

@@ -31,13 +31,20 @@ Return **one** JSON object, no markdown fences, no prose:
 
 ### `set_column` — edit an existing column
 Required: `table`, `column` (must exist). Optional:
-`type`, `baseType`, `referencedTable`, `properties`, `appFormula`, `initialValue`, `suggestedValues`, `validIf`, `displayName`, `showIf`, `editableIf`, `requireIf`, `resetIf`.
+`type`, `baseType`, `referencedTable`, `enumerationList`, `properties`, `appFormula`, `initialValue`, `suggestedValues`, `validIf`, `displayName`, `showIf`, `editableIf`, `requireIf`, `resetIf`.
 - **Ref**: `type:"Ref"` + `referencedTable:"OtherTable"`.
 - **Enum/EnumList of Refs**: `type:"Enum"` (or `"EnumList"`) + `baseType:"Ref"` + `referencedTable`. Filter selectable rows with `validIf`, e.g. `SELECT(SKUS[sku_id], [status]="active")`.
+- **Enum/EnumList with a fixed value list** (the common case): `type:"Enum"` (or `"EnumList"`) + `enumerationList` — an **array of strings** written into the column's Type Details "Values" list, e.g. `"enumerationList": ["Pending", "Approved", "Rejected"]`.
+
+> **`enumerationList` vs `suggestedValues` — prefer `enumerationList`.**
+> For a column that should hold one of a known, fixed set of options, use `enumerationList`. It sets the actual Enum **Values** list, so the app renders a real dropdown/buttons control bound to those options.
+> `suggestedValues` is a *different* mechanism — an AppSheet **expression** returning a dynamic list, shown only as soft autocomplete hints on a Text-like column; it does **not** make the column an Enum and does **not** constrain input.
+> Only use `suggestedValues` when the user explicitly asks for dynamic/expression-driven suggestions, or the option set genuinely must be computed at runtime. If unsure which the user wants, **ask before writing the changeset** — do not silently pick `suggestedValues`.
 
 ### `add_virtual_column` — new computed column
-Required: `table`, `name` (no spaces, unique in table), `type`. Should set `appFormula` (its whole purpose). Optional: `validIf`, `showIf`, `displayName`, `baseType`, `referencedTable`, `properties`.
+Required: `table`, `name` (no spaces, unique in table), `type`. Should set `appFormula` (its whole purpose). Optional: `validIf`, `showIf`, `displayName`, `baseType`, `referencedTable`, `enumerationList`, `properties`.
 - The app auto-detects Type from the formula, so the engine sets the formula first then the explicit Type — you just supply both.
+- `enumerationList` (array of strings) works here too for Enum/EnumList VCs with a fixed value list — same preference over `suggestedValues` as in `set_column` above.
 
 ### `set_table` — table-level settings
 Required: `table`. Optional: `dataFilter` (row-level security filter), `updateModeExpression` ("are updates allowed" — `TRUE` = editable, `FALSE` = read-only).

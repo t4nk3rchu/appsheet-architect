@@ -11,6 +11,7 @@ under load so an agent makes changes that move the needle instead of guessing.
 |---|---|
 | [`SKILL.md`](./SKILL.md) | Entry point — the mental model, mode router, and hard constraints. **Start here.** |
 | [`references/diagnostics.md`](./references/diagnostics.md) | Shared knowledge base: the sync/cost model, ~40 ranked anti-patterns with fixes, hard limits. |
+| [`references/expressions.md`](./references/expressions.md) | Comprehensive catalog of all AppSheet functions & formulas (syntax, return types, bilingual En/Vi explanations, realistic examples, and performance guidance). |
 | [`references/design.md`](./references/design.md) | Designing a new app/table/feature from requirements. |
 | [`references/audit-refactor.md`](./references/audit-refactor.md) | Auditing / optimizing / refactoring an existing app. |
 | [`references/data-and-backend.md`](./references/data-and-backend.md) | Data-source choice, Apps Script / bot offload. |
