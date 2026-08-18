@@ -50,18 +50,34 @@ Required: `table`, `name` (no spaces, unique in table), `type`. Should set `appF
 Required: `table`. Optional: `dataFilter` (row-level security filter), `updateModeExpression` ("are updates allowed" — `TRUE` = editable, `FALSE` = read-only).
 
 ### `add_view` / `set_view`
-`add_view` requires `name`, `viewType`, and `table` — **except dashboards** (which have no "For this data", so omit `table`). `set_view` requires `view` (existing name). Optional: `position`, `groupAggregate`, `showIf`, `displayName`, `icon`, `sortBy`, `groupBy`, plus the view-type-specific fields below and the `properties` escape-hatch.
+`add_view` **requires** `name`, `viewType`, **and** `table` (the "For this data" source — a table **or a slice**) — **except dashboards** (which have no "For this data", so omit `table`). `set_view` **requires** `view` = the **exact, already-existing** view name (verify it against the live app; a wrong/nonexistent name fails with "Không mở được view / can't open view" and the change is dropped — auto-generated views are usually named after the **view**, which may differ from the table name). Optional: `position`, `groupAggregate`, `showIf`, `displayName`, `icon`, `sortBy`, `groupBy`, plus the view-type-specific fields below and the `properties` escape-hatch.
 - `viewType`: `table | deck | gallery | detail | map | calendar | chart | dashboard | form | onboarding | card`
 - `position`: `left most | left | center | right | right most | menu | ref`
 - `sortBy`/`groupBy`: array of `{ "column": "col", "order": "Ascending" | "Descending" }` (default Ascending). On `set_view` these **append**.
 
+> **`groupBy` / `groupAggregate` are for `table` and `deck` views only — NOT charts.** They group rows and show an aggregate in the group header (`groupAggregate`: `SUM | AVERAGE | COUNT | MIN | MAX | …`, under the view's "View Options"). A **chart** has no "Group by" field — putting `groupBy`/`groupAggregate` on a chart is silently skipped ("Field chưa vào (kiểm tay)"). A chart aggregates via its **chart type** (see below), not `groupBy`.
+
 **Dashboard** (`viewType:"dashboard"`) — a container of other views. Omit `table`. Set its embedded views with:
 - `viewEntries`: array of `{ "view": "ExistingViewName", "size": "Large" | "Wide" | "Tall" | "Small" }` (or bare `"ViewName"` strings). Create any child views earlier in the same `changes` array. On `set_view`, entries **append**.
 
-**Chart** (`viewType:"chart"`):
-- `chartType`: **exact** AppSheet label — `Histogram | Horizontal Histogram | PieChart | DonutChart | Aggregate PieChart | Aggregate DonutChart | Col Series | Col Series [Stack] | Col Series [Line] | Row Series | Row Series [Stack] | Row Series [Line] | Scatter Plot` (not "pie"/"bar").
-- `chartColumns`: array of column names to plot. **AppSheet filters this picker by chart type** — pick compatible column types or the entry is dropped: Histogram/Horizontal Histogram = **categorical** (Enum/Text/Ref/Date/Yes-No; counts occurrences); PieChart/DonutChart/Col Series/Row Series/Scatter Plot = **Number** (Number/Decimal/Price/Percent); Aggregate Pie/Donut = group a categorical column. E.g. a PieChart needs a numeric column — an Enum won't appear in its picker.
-- Other chart props (`Chart colors`, `Trend line`, `Show legend`) → `properties`.
+**Chart** (`viewType:"chart"`) — **required**: `chartType` + `chartColumns`. Optional: `sortBy`, `properties`. **A chart has NO `groupBy`/`groupAggregate`** (see the box above) — do not emit them on a chart.
+
+- `chartType`: use the **exact** AppSheet label (not "pie"/"bar"). `chartColumns` is filtered by chart type — pick the right column type or the entry is dropped. How each type aggregates:
+
+| `chartType` (exact) | What `chartColumns` must be | How it aggregates | Notes |
+|---|---|---|---|
+| `Histogram` | 1 **categorical** col (Enum/Text/Ref/Date/Yes-No) | **Counts** occurrences per category | Vertical bars |
+| `Horizontal Histogram` | 1 **categorical** col | Counts per category | Horizontal bars |
+| `PieChart` | 1 **categorical** col | Counts per category (proportion) | |
+| `DonutChart` | 1 **categorical** col | Counts per category | |
+| `Aggregate PieChart` | 1 **categorical** col to group by | **Aggregates a numeric** column per category (the only pie/donut that sums a value, not counts) | Set the aggregated column + function in the editor / `properties` |
+| `Aggregate DonutChart` | 1 **categorical** col to group by | Aggregates a numeric column per category | |
+| `Col Series` / `Col Series [Stack]` / `Col Series [Line]` | 1+ **Number** cols (Number/Decimal/Price/Percent) | **Per-row, NOT aggregated** — one bar/point per row, X-axis = the row's label column | Vertical bars |
+| `Row Series` / `Row Series [Stack]` / `Row Series [Line]` | 1+ **Number** cols | Per-row, not aggregated | Horizontal bars |
+| `Scatter Plot` | 2 **Number** cols (x, y) | Per-row point | |
+
+- **Aggregating across rows** (the common "TOTAL of X by category Y" report): only the **Aggregate Pie/Donut** chart types sum a value per category. `Col Series`/`Row Series` plot **one bar per row** and do **not** sum — for summed bars by category, point the chart at a **slice or summary table that is already one row per category** (pre-aggregate the data), or use a **grouped `table`/`deck` view with `groupAggregate: "SUM"`** instead of a chart. Do **not** try to fake it with `groupBy` on a `Col Series` — that field does not exist.
+- Other chart props (`Chart colors`, `Trend line`, `Show legend`, aggregate function/column) → `properties` (exact editor labels).
 
 **Table** (`viewType:"table"`), which columns show:
 - `columnOrder`: `"automatic" | "manual"`.
@@ -125,11 +141,11 @@ Grouped action (children first, then COMPOSITE):
 ] }
 ```
 
-Chart + dashboard (child view first, then the dashboard that embeds it):
+Chart + dashboard (child view first, then the dashboard that embeds it). Revenue **summed by region** → `Aggregate PieChart` grouped on the categorical `region` (a plain `PieChart` would *count* rows per region, not sum revenue; a `Col Series` would draw one bar per order, not per region):
 ```json
 { "changes": [
   { "op": "add_view", "name": "Revenue_Pie", "table": "ORDERS", "viewType": "chart", "icon": "chart-pie",
-    "chartType": "PieChart", "chartColumns": ["total_amount"], "properties": { "Show legend": "true" } },
+    "chartType": "Aggregate PieChart", "chartColumns": ["region"], "properties": { "Show legend": "true" } },
   { "op": "add_view", "name": "Ops_Dashboard", "viewType": "dashboard", "position": "menu", "icon": "th-large",
     "viewEntries": [ { "view": "Revenue_Pie", "size": "Large" }, { "view": "Orders_Table", "size": "Tall" } ] }
 ] }
@@ -159,5 +175,5 @@ Notes & limits:
 - Structural changes only replay into the editor DOM; **the user must Save**. Row data is out of scope.
 - `sortBy`/`groupBy`/`viewEntries` **append** on `set_view` (they don't replace existing rows).
 - **Not yet supported:** table column **reordering** (`viewColumns` shows/hides only, order unchanged); slice columns/update-mode default to "all". CALL/SMS/EMAIL/OPEN_FILE fields work via `properties`.
-- **Chart columns are filtered by chart type** — a column of the wrong type (e.g. an Enum in a PieChart) won't be selectable and is dropped. Match the type: categorical for Histogram, Number for Pie/Donut/Series/Scatter.
+- **Chart columns are filtered by chart type** — a wrong-type column isn't selectable and is dropped. Match the type: **categorical** for Histogram / Pie / Donut / Aggregate-Pie/Donut (which group a category); **Number** for Col/Row Series and Scatter. See the chart table above for how each type counts vs. aggregates vs. plots per-row.
 - Names are validated against the live schema; unknown names are hard errors (the change is dropped). Property-label/enum-value/chart-column mismatches are non-blocking warnings.

@@ -163,9 +163,9 @@ What it can apply (structure only — never row data, and the user always clicks
 
 - `set_column` (type, App formula, Valid If, Show/Editable/Require/Reset, Enum/EnumList base-type Ref, and any type-specific property), `add_virtual_column`
 - `set_table` (security filter, "are updates allowed")
-- `add_view` / `set_view` — all 11 view types, Sort by / Group by, plus:
+- `add_view` / `set_view` — all 11 view types. `add_view` needs `name`+`viewType`+`table` (table **or slice**; dashboards omit `table`); `set_view` needs an **exact existing** `view` name. Sort by (any view); **Group by / Group aggregate on `table`/`deck` only — never on charts**. Plus:
   - **dashboards** (omit `table`; embed views via `viewEntries` `[{view,size}]`)
-  - **charts** (`chartType` exact label + `chartColumns`; columns filtered by chart type — categorical for Histogram, Number for Pie/Donut/Series/Scatter)
+  - **charts** (`chartType` exact label + `chartColumns`; columns filtered by type — categorical for Histogram/Pie/Donut, Number for Col/Row Series/Scatter; only Aggregate Pie/Donut sum a value across rows — Col/Row Series plot one bar per row, so pre-aggregate via a slice/summary table for "SUM by category")
   - **table column show/hide** (`columnOrder` auto/manual + `viewColumns`; reorder not yet supported)
   - **any other view property** via the `properties` escape-hatch keyed by exact editor label (map `Map column`, calendar `Start date`, deck headers, chart `Show legend`, …)
 - `add_slice` / `set_slice` (Row filter condition)
