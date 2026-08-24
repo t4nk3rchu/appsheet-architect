@@ -31,79 +31,30 @@ Return **one** JSON object, no markdown fences, no prose:
 
 ### `set_column` — edit an existing column
 Required: `table`, `column` (must exist). Optional:
-`type`, `baseType`, `referencedTable`, `enumerationList`, `properties`, `appFormula`, `initialValue`, `suggestedValues`, `validIf`, `displayName`, `showIf`, `editableIf`, `requireIf`, `resetIf`.
+`type`, `baseType`, `referencedTable`, `properties`, `appFormula`, `initialValue`, `suggestedValues`, `validIf`, `displayName`, `showIf`, `editableIf`, `requireIf`, `resetIf`.
 - **Ref**: `type:"Ref"` + `referencedTable:"OtherTable"`.
 - **Enum/EnumList of Refs**: `type:"Enum"` (or `"EnumList"`) + `baseType:"Ref"` + `referencedTable`. Filter selectable rows with `validIf`, e.g. `SELECT(SKUS[sku_id], [status]="active")`.
-- **Enum/EnumList with a fixed value list** (the common case): `type:"Enum"` (or `"EnumList"`) + `enumerationList` — an **array of strings** written into the column's Type Details "Values" list, e.g. `"enumerationList": ["Pending", "Approved", "Rejected"]`.
-
-> **`enumerationList` vs `suggestedValues` — prefer `enumerationList`.**
-> For a column that should hold one of a known, fixed set of options, use `enumerationList`. It sets the actual Enum **Values** list, so the app renders a real dropdown/buttons control bound to those options.
-> `suggestedValues` is a *different* mechanism — an AppSheet **expression** returning a dynamic list, shown only as soft autocomplete hints on a Text-like column; it does **not** make the column an Enum and does **not** constrain input.
-> Only use `suggestedValues` when the user explicitly asks for dynamic/expression-driven suggestions, or the option set genuinely must be computed at runtime. If unsure which the user wants, **ask before writing the changeset** — do not silently pick `suggestedValues`.
 
 ### `add_virtual_column` — new computed column
-Required: `table`, `name` (no spaces, unique in table), `type`. Should set `appFormula` (its whole purpose). Optional: `validIf`, `showIf`, `displayName`, `baseType`, `referencedTable`, `enumerationList`, `properties`.
+Required: `table`, `name` (no spaces, unique in table), `type`. Should set `appFormula` (its whole purpose). Optional: `validIf`, `showIf`, `displayName`, `baseType`, `referencedTable`, `properties`.
 - The app auto-detects Type from the formula, so the engine sets the formula first then the explicit Type — you just supply both.
-- `enumerationList` (array of strings) works here too for Enum/EnumList VCs with a fixed value list — same preference over `suggestedValues` as in `set_column` above.
 
 ### `set_table` — table-level settings
 Required: `table`. Optional: `dataFilter` (row-level security filter), `updateModeExpression` ("are updates allowed" — `TRUE` = editable, `FALSE` = read-only).
 
 ### `add_view` / `set_view`
-`add_view` **requires** `name`, `viewType`, **and** `table` (the "For this data" source — a table **or a slice**) — **except dashboards** (which have no "For this data", so omit `table`). `set_view` **requires** `view` = the **exact, already-existing** view name (verify it against the live app; a wrong/nonexistent name fails with "Không mở được view / can't open view" and the change is dropped — auto-generated views are usually named after the **view**, which may differ from the table name). Optional: `position`, `groupAggregate`, `showIf`, `displayName`, `icon`, `sortBy`, `groupBy`, plus the view-type-specific fields below and the `properties` escape-hatch.
+`add_view` requires `name`, `viewType`, and `table` — **except dashboards** (which have no "For this data", so omit `table`). `set_view` requires `view` (existing name). Optional: `position`, `groupAggregate`, `showIf`, `displayName`, `icon`, `sortBy`, `groupBy`, plus the view-type-specific fields below and the `properties` escape-hatch.
 - `viewType`: `table | deck | gallery | detail | map | calendar | chart | dashboard | form | onboarding | card`
 - `position`: `left most | left | center | right | right most | menu | ref`
-
-> **`position:"ref"` hijacks Ref column navigation — choose one of three patterns.**
->
-> AppSheet assigns **every `position:"ref"` view on a table** as the default drill-through target for Ref columns pointing to that table — replacing the system-generated detail view. Adding a secondary view (chart, filtered report, role-specific layout) at `position:"ref"` silently breaks all Ref navigation for that table.
->
-> Pick the right pattern based on user intent:
->
-> **Pattern A — Replace the system view** (user explicitly wants a different default detail):
-> Use `position:"ref"`. The new view becomes the Ref drill-through for that table everywhere in the app.
->
-> **Pattern B — Secondary nav view** (appears in the left nav / menu, visible to the user, but shouldn't hijack Ref):
-> Use `position:"menu"` and guard with `showIf`:
-> - Hide from nav but embeddable in dashboards: `"showIf": "false"`
-> - Show only when inside a detail drill: `"showIf": "CONTEXT(\"ViewType\") = \"detail\""`
-> - Show only from a specific parent view: `"showIf": "CONTEXT(\"View\") = \"Trang chủ\""`
-> - Show only for a role: `"showIf": "USERROLE() = \"Admin\""`
->
-> **Pattern C — Dashboard/chart child view that should not appear in nav at all** (cleanest):
-> Create a **no-filter slice** on the table, name it descriptively (e.g. `CHART_CHI_PHI_VT`), and bind the view to the slice instead of the base table. Because the data source is a slice name (not the base table name), AppSheet will not treat it as a Ref navigation target. No `showIf` gymnastics needed; the view is invisible to nav by default.
-> ```json
-> { "op": "add_slice", "table": "CHI_TIẾT_PHIẾU_KHO", "name": "CHART_CHI_PHI_VT" },
-> { "op": "add_view", "name": "BC_Chi phí vật tư", "table": "CHART_CHI_PHI_VT",
->   "viewType": "chart", "position": "ref", "chartType": "Col Series", "chartColumns": ["thành_tiền"] }
-> ```
-> **Decision tree:** user wants a dashboard child view or chart on a table that already has a system view → **Pattern C** (slice). User wants a conditional/role-gated nav item → **Pattern B** (menu + showIf). User wants to replace the default Ref drill-through → **Pattern A** (ref).
-
 - `sortBy`/`groupBy`: array of `{ "column": "col", "order": "Ascending" | "Descending" }` (default Ascending). On `set_view` these **append**.
-
-> **`groupBy` / `groupAggregate` are for `table` and `deck` views only — NOT charts.** They group rows and show an aggregate in the group header (`groupAggregate`: `SUM | AVERAGE | COUNT | MIN | MAX | …`, under the view's "View Options"). A **chart** has no "Group by" field — putting `groupBy`/`groupAggregate` on a chart is silently skipped ("Field chưa vào (kiểm tay)"). A chart aggregates via its **chart type** (see below), not `groupBy`.
 
 **Dashboard** (`viewType:"dashboard"`) — a container of other views. Omit `table`. Set its embedded views with:
 - `viewEntries`: array of `{ "view": "ExistingViewName", "size": "Large" | "Wide" | "Tall" | "Small" }` (or bare `"ViewName"` strings). Create any child views earlier in the same `changes` array. On `set_view`, entries **append**.
 
-**Chart** (`viewType:"chart"`) — **required**: `chartType` + `chartColumns`. Optional: `sortBy`, `properties`. **A chart has NO `groupBy`/`groupAggregate`** (see the box above) — do not emit them on a chart.
-
-- `chartType`: use the **exact** AppSheet label (not "pie"/"bar"). `chartColumns` is filtered by chart type — pick the right column type or the entry is dropped. How each type aggregates:
-
-| `chartType` (exact) | What `chartColumns` must be | How it aggregates | Notes |
-|---|---|---|---|
-| `Histogram` | 1 **categorical** col (Enum/Text/Ref/Date/Yes-No) | **Counts** occurrences per category | Vertical bars |
-| `Horizontal Histogram` | 1 **categorical** col | Counts per category | Horizontal bars |
-| `PieChart` | 1 **categorical** col | Counts per category (proportion) | |
-| `DonutChart` | 1 **categorical** col | Counts per category | |
-| `Aggregate PieChart` | 1 **categorical** col to group by | **Aggregates a numeric** column per category (the only pie/donut that sums a value, not counts) | Set the aggregated column + function in the editor / `properties` |
-| `Aggregate DonutChart` | 1 **categorical** col to group by | Aggregates a numeric column per category | |
-| `Col Series` / `Col Series [Stack]` / `Col Series [Line]` | 1+ **Number** cols (Number/Decimal/Price/Percent) | **Per-row, NOT aggregated** — one bar/point per row, X-axis = the row's label column | Vertical bars |
-| `Row Series` / `Row Series [Stack]` / `Row Series [Line]` | 1+ **Number** cols | Per-row, not aggregated | Horizontal bars |
-| `Scatter Plot` | 2 **Number** cols (x, y) | Per-row point | |
-
-- **Aggregating across rows** (the common "TOTAL of X by category Y" report): only the **Aggregate Pie/Donut** chart types sum a value per category. `Col Series`/`Row Series` plot **one bar per row** and do **not** sum — for summed bars by category, point the chart at a **slice or summary table that is already one row per category** (pre-aggregate the data), or use a **grouped `table`/`deck` view with `groupAggregate: "SUM"`** instead of a chart. Do **not** try to fake it with `groupBy` on a `Col Series` — that field does not exist.
-- Other chart props (`Chart colors`, `Trend line`, `Show legend`, aggregate function/column) → `properties` (exact editor labels).
+**Chart** (`viewType:"chart"`):
+- `chartType`: **exact** AppSheet label — `Histogram | Horizontal Histogram | PieChart | DonutChart | Aggregate PieChart | Aggregate DonutChart | Col Series | Col Series [Stack] | Col Series [Line] | Row Series | Row Series [Stack] | Row Series [Line] | Scatter Plot` (not "pie"/"bar").
+- `chartColumns`: array of column names to plot. **AppSheet filters this picker by chart type** — pick compatible column types or the entry is dropped: Histogram/Horizontal Histogram = **categorical** (Enum/Text/Ref/Date/Yes-No; counts occurrences); PieChart/DonutChart/Col Series/Row Series/Scatter Plot = **Number** (Number/Decimal/Price/Percent); Aggregate Pie/Donut = group a categorical column. E.g. a PieChart needs a numeric column — an Enum won't appear in its picker.
+- Other chart props (`Chart colors`, `Trend line`, `Show legend`) → `properties`.
 
 **Table** (`viewType:"table"`), which columns show:
 - `columnOrder`: `"automatic" | "manual"`.
@@ -126,6 +77,76 @@ Required: `table`. Optional: `dataFilter` (row-level security filter), `updateMo
 
 ### `add_format_rule` / `set_format_rule`
 `add_format_rule` requires `table`, `name`. `set_format_rule` requires `rule` (existing name). Optional: `condition`, `columns` (array of column names and/or `"__action__ActionName"`), `icon`, `highlightColor`, `textColor`, `bold`/`italic`/`underline`/`uppercase`/`strikethrough` (`"true"`/`"false"`), `imageSize`.
+
+### `add_bot` — Automation bot (event + process steps)
+Creates a bot in **Automation → Bots** with an **event** and one or more **process steps**. Required: `name` (bot name), `steps` (non-empty array). The event kind is `eventType`: `"data_change"` (default) or `"scheduled"`.
+
+Shared optional fields (both event kinds):
+- `eventName` — the event's display name (default is an auto "New event N").
+- `condition` — a true/false expression; the process runs only when it's true (e.g. `[trạng_thái_duyệt] = "Đã Duyệt"`).
+- `bypassSecurity` — `true`/`false` ("Bypass security filters?" toggle).
+
+**Data-change event** (`eventType` omitted or `"data_change"`) — also requires `table` (the event's table/slice). Optional:
+- `dataChangeType` — which changes fire the event: an **array** subset of `["Adds", "Deletes", "Updates"]` (e.g. `["Adds", "Updates"]`). Omit for the default (all three). A legacy string alias (`"Adds and updates"`, `"Deletes only"`, `"All changes"`, …) is also accepted and normalized to the array; an unknown value or empty array is a hard error.
+
+**Scheduled event** (`eventType: "scheduled"`) — **no `table`**. Requires `frequency`, one of `Hourly | Daily | Weekly | Monthly | Monthly by week`. Frequency-specific fields:
+- `Hourly` → `minuteOfHour` (0–59).
+- `Daily` → `time` (e.g. `"2:30 pm"`).
+- `Weekly` → `daysOfWeek` (array of `Sun`…`Sat`) + `time`.
+- `Monthly` → `dayOfMonth` (1–31) + `time`.
+- `Monthly by week` → `weekOfMonth` (`1st`|`2nd`|`3rd`|`4th`|`last`) + `daysOfWeek` + `time`.
+- Optional `timeZone` — a **substring** of a Time-zone dropdown label (e.g. `"GMT+07"` or `"SE Asia"`; the +07 option is "(GMT+07:00) SE Asia Standard Time"). AppSheet's scheduled event has **no start/end date**; any omitted field keeps AppSheet's default. `dataChangeType` is ignored for scheduled. For a scheduled data-action step, enable For-Each-Row via `forEachRow` (see the step section).
+
+**Steps** come in two kinds (each also takes an optional `name` display label):
+
+**Run a task** — set `task`: `"email"` | `"notification"` | `"webhook"`. This is the natural pairing for scheduled bots (send mail / notify / call a webhook on a schedule).
+- `email`: `to` (recipient expression or array of them), optional `cc` / `bcc` (same form as `to`; email only), `subject`, `body`. More email fields via `taskProps` (exact labels): `Reply To`, `Customize "From" name`, `PreHeader`.
+- `notification`: `to`, `title`, `body`, optional `deepLink`.
+- `webhook`: `url` (required), optional `verb` (`GET`/`POST`/…), `contentType` (AppSheet values: `JSON` (default) | `CSV` | `FORM_URL_ENCODED` | `HTML` | `PDF` | `XLSX` | `XML` | `ICS_CALENDAR` — MIME aliases like `application/json` are accepted), `body`, `headers`.
+- Any other task field → `taskProps`: `{ "<exact editor label>": "value" }`.
+
+**Run a data action** — no `task`:
+- **Existing action** — `action` = the name of an action **that already exists on the bot's table**. Nothing else needed. Create it earlier with `add_action` if it doesn't exist yet.
+- **Custom run-on-rows** — `custom: "run_action_on_rows"` + `action` + `table` (Referenced Table) + `rows` (Referenced rows expression).
+- On a **scheduled** event, a run-a-data-action step **requires** the event to enable For-Each-Row: set `forEachRow`: `{ "table": "T", "condition": "<filter expr>" }` on the `add_bot`.
+
+To use add-row/delete/set-value/grouped behavior in a bot, create the action first via `add_action`, then reference it by name (existing mode) — put those `add_action` ops **before** the `add_bot`.
+
+```json
+{ "changes": [
+  { "op": "add_bot", "name": "Duyệt & cập nhật kho", "table": "PHIẾU_KHO",
+    "eventName": "Khi phiếu được duyệt", "condition": "[trạng_thái_duyệt] = \"Đã Duyệt\"",
+    "dataChangeType": ["Adds", "Updates"],
+    "steps": [
+      { "type": "run_a_data_action", "action": "Duyệt phiếu", "name": "Bước duyệt" },
+      { "type": "run_a_data_action", "custom": "run_action_on_rows", "action": "R_VẬT_TƯ",
+        "table": "VẬT_TƯ", "rows": "[Related CHI_TIẾT_PHIẾU_KHOs][ref_vật_tư]", "name": "Cập nhật vật tư" }
+    ] }
+] }
+```
+
+Scheduled bot — email every Monday & Wednesday at 8:00 am (Run a task):
+```json
+{ "changes": [
+  { "op": "add_bot", "name": "Nhắc kiểm kho", "eventType": "scheduled",
+    "eventName": "Đầu tuần", "frequency": "Weekly",
+    "daysOfWeek": ["Mon", "Wed"], "time": "8:00 am", "timeZone": "SE Asia",
+    "steps": [
+      { "task": "email", "to": "USEREMAIL()", "subject": "Nhắc kiểm kho",
+        "body": "Vui lòng kiểm kho hôm nay.", "name": "Gửi email" }
+    ] }
+] }
+```
+
+Scheduled bot — daily data action over filtered rows (needs `forEachRow`):
+```json
+{ "changes": [
+  { "op": "add_bot", "name": "Đóng phiếu quá hạn", "eventType": "scheduled",
+    "frequency": "Daily", "time": "1:00 am",
+    "forEachRow": { "table": "PHIẾU_KHO", "condition": "[trạng_thái] = \"Chờ\"" },
+    "steps": [ { "action": "Đóng phiếu", "name": "Đóng" } ] }
+] }
+```
 
 ---
 
@@ -167,11 +188,11 @@ Grouped action (children first, then COMPOSITE):
 ] }
 ```
 
-Chart + dashboard (child view first, then the dashboard that embeds it). Revenue **summed by region** → `Aggregate PieChart` grouped on the categorical `region` (a plain `PieChart` would *count* rows per region, not sum revenue; a `Col Series` would draw one bar per order, not per region):
+Chart + dashboard (child view first, then the dashboard that embeds it):
 ```json
 { "changes": [
   { "op": "add_view", "name": "Revenue_Pie", "table": "ORDERS", "viewType": "chart", "icon": "chart-pie",
-    "chartType": "Aggregate PieChart", "chartColumns": ["region"], "properties": { "Show legend": "true" } },
+    "chartType": "PieChart", "chartColumns": ["total_amount"], "properties": { "Show legend": "true" } },
   { "op": "add_view", "name": "Ops_Dashboard", "viewType": "dashboard", "position": "menu", "icon": "th-large",
     "viewEntries": [ { "view": "Revenue_Pie", "size": "Large" }, { "view": "Orders_Table", "size": "Tall" } ] }
 ] }
@@ -198,8 +219,9 @@ Table view showing only chosen columns:
 Settings (⚙): AI provider + API key (BYOK: Gemini or DeepSeek); **Build App conventions** (always-on house rules injected into every generation); **Skills** (upload `.skill`/`.md` files or a `.zip` package — the AI reads each skill's description and applies matching ones).
 
 Notes & limits:
+- **Idempotent re-runs.** Applying the same changeset twice does not duplicate: `add_view`/`add_action`/`add_slice`/`add_format_rule` **upsert** (open the existing same-named item and update it in place); `add_virtual_column` and `add_bot` **skip** if the name already exists. To update an existing item, use the matching `set_*` op (`set_column` for a virtual column).
 - Structural changes only replay into the editor DOM; **the user must Save**. Row data is out of scope.
 - `sortBy`/`groupBy`/`viewEntries` **append** on `set_view` (they don't replace existing rows).
 - **Not yet supported:** table column **reordering** (`viewColumns` shows/hides only, order unchanged); slice columns/update-mode default to "all". CALL/SMS/EMAIL/OPEN_FILE fields work via `properties`.
-- **Chart columns are filtered by chart type** — a wrong-type column isn't selectable and is dropped. Match the type: **categorical** for Histogram / Pie / Donut / Aggregate-Pie/Donut (which group a category); **Number** for Col/Row Series and Scatter. See the chart table above for how each type counts vs. aggregates vs. plots per-row.
+- **Chart columns are filtered by chart type** — a column of the wrong type (e.g. an Enum in a PieChart) won't be selectable and is dropped. Match the type: categorical for Histogram, Number for Pie/Donut/Series/Scatter.
 - Names are validated against the live schema; unknown names are hard errors (the change is dropped). Property-label/enum-value/chart-column mismatches are non-blocking warnings.
