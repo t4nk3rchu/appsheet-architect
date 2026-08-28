@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
 """
-parse_appdoc.py — normalize an AppSheet "Documentation" export and pull the
-signals an audit actually needs.
+parse_appdoc.py — normalize an AppSheet "Documentation" export and extract
+audit signals, VC leaderboards, and write-contention indicators.
 
 The Documentation export (Editor -> Manage -> Author -> Documentation, saved as
 text/PDF-to-text) is a paginated label/value dump that can run to 100k+ lines for
 a large app. It is too big to read whole, its pages are interrupted by
-"===== Trang N =====" / "===== Page N =====" markers, and long values (Type
-Qualifier JSON, formulas, view configs) wrap across several lines.
+"===== Trang N =====" / "===== Page N =====" markers, and long values wrap.
 
-A script does two things here that a human or an LLM reading the raw file does
-badly:
-  1. Denoise + split the monster into per-section files small enough to read.
-  2. Count across the WHOLE app — total virtual columns, the per-table VC
-     leaderboard, tables grouped by data source (to spot write contention),
-     view-type distribution, action counts. Aggregates over 100k lines are
-     exactly what an LLM miscounts and a script nails.
-
-It deliberately does NOT try to perfectly reassemble every wrapped expression —
-that is fragile and version-dependent. It extracts the clean single-line signals
-(Virtual? Yes/No, Type, Data Source, View type, ...) and leaves readable,
-denoised per-section text in the output dir so the agent can read specific
-tables/columns for expression-level review.
+This script:
+  1. Denoises + splits the export into per-section text files.
+  2. Aggregates metrics across the WHOLE app:
+     - Total virtual columns and per-table VC leaderboard
+     - Tables grouped by data source and workbook (to spot write contention)
+     - View-type distribution
+     - Slices, Actions, and Format Rules counts
 
 Usage:
     python parse_appdoc.py <appdoc.txt> [--out OUTDIR]
@@ -32,8 +25,8 @@ Outputs (in OUTDIR, default "<appdoc>_parsed/"):
     columns.txt     — normalized Columns section (per schema, per column)
     slices.txt      — normalized Slices section
     views.txt       — normalized Views section
-    format_rules.txt
-    actions.txt
+    format_rules.txt— normalized Format Rules section
+    actions.txt     — normalized Actions section
     app.json        — machine-readable structure (tables, per-schema VC counts, ...)
 """
 import argparse
@@ -46,14 +39,12 @@ from collections import Counter, defaultdict
 # Page-break markers seen in real exports (English "Page", Vietnamese "Trang").
 PAGE_RE = re.compile(r"^=====\s*(Trang|Page)\s+\d+\s*=====\s*$", re.IGNORECASE)
 
-# Top-level section headers, in the order AppSheet emits them. A line equal to
-# one of these (exactly) flips the current section.
+# Top-level section headers, in the order AppSheet emits them.
 SECTION_HEADERS = [
     "Tables", "Columns", "Slices", "Views", "Format Rules", "Actions",
 ]
 
-# Record-start patterns per section: the combined "Label value" line that
-# delimits one record (distinct from the bare "Label" field line that follows).
+# Record-start patterns per section
 RECORD_START = {
     "Tables":       re.compile(r"^Table name (.+)$"),
     "Columns":      re.compile(r"^Column \d+: (.+)$"),
@@ -103,218 +94,270 @@ def split_sections(lines):
     return sections
 
 
-def parse_columns(lines):
-    """
-    Walk the Columns section. Track the enclosing schema and each 'Column N:'
-    record; capture Type, Virtual?, and the App formula hint (first line).
-    Returns (per_schema, vc_total) where per_schema is
-        {schema: {"columns": int, "virtual": int, "vcols": [(name, type, formula_hint)]}}
-    """
-    per_schema = defaultdict(lambda: {"columns": 0, "virtual": 0, "vcols": []})
-    schema = "(unknown)"
-    col = None
-    ctype = ""
-    formula = ""
-    is_virtual = False
-
-    def flush():
-        nonlocal col, ctype, formula, is_virtual
-        if col is None:
-            return
-        per_schema[schema]["columns"] += 1
-        if is_virtual:
-            per_schema[schema]["virtual"] += 1
-            per_schema[schema]["vcols"].append((col, ctype, formula))
-        col, ctype, formula, is_virtual = None, "", "", False
-
-    for i, s in enumerate(lines):
-        m = SCHEMA_RE.match(s)
-        if m:
-            flush()
-            schema = m.group(1).strip()
-            continue
-        mc = RECORD_START["Columns"].match(s)
-        if mc:
-            flush()
-            col = mc.group(1).strip()
-            continue
-        if col is None:
-            continue
-        if s == "Type":
-            ctype = value_after(lines, i)
-        elif s == "App formula":
-            formula = value_after(lines, i)
-        elif s == "Virtual?":
-            is_virtual = value_after(lines, i).lower().startswith("y")
-    flush()
-
-    vc_total = sum(v["virtual"] for v in per_schema.values())
-    return per_schema, vc_total
-
-
 def parse_tables(lines):
-    """Return list of {name, source, updates, source_path, partitioned}."""
+    """Return list of dicts: name, data_source, source_path, update_mode, row_count (if present)."""
     tables = []
     cur = None
-
-    def field(i, s, label):
-        return value_after(lines, i) if s == label else None
-
-    for i, s in enumerate(lines):
-        m = RECORD_START["Tables"].match(s)
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        m = RECORD_START["Tables"].match(ln)
         if m:
             if cur:
                 tables.append(cur)
-            cur = {"name": m.group(1).strip(), "source": "", "updates": "",
-                   "source_path": "", "partitioned": ""}
+            cur = {"name": m.group(1).strip(), "data_source": "", "source_path": "", "update_mode": "", "filter": ""}
+            i += 1
             continue
         if not cur:
+            i += 1
             continue
-        if s == "Data Source":
-            cur["source"] = value_after(lines, i)
-        elif s == "Are updates allowed?":
-            cur["updates"] = value_after(lines, i)
-        elif s == "Source Path":
+        if ln == "Data Source":
+            cur["data_source"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "Source Path":
             cur["source_path"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "Are updates allowed?":
+            cur["update_mode"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "Row filter condition":
+            cur["filter"] = value_after(lines, i)
+            i += 2
+            continue
+        i += 1
     if cur:
         tables.append(cur)
     return tables
 
 
-def parse_named(lines, section):
-    """Generic: return the list of record names for a section."""
-    rx = RECORD_START[section]
-    return [m.group(1).strip() for m in (rx.match(s) for s in lines) if m]
+def parse_columns(lines):
+    """
+    Return:
+      per_schema: { schema_name: [ {name, type, is_virtual, formula, ...} ] }
+      total_vc: int
+      vc_by_schema: Counter({ schema_name: count })
+    """
+    per_schema = defaultdict(list)
+    current_schema = "UNKNOWN"
+    cur_col = None
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        sm = SCHEMA_RE.match(ln)
+        if sm:
+            if cur_col:
+                per_schema[current_schema].append(cur_col)
+                cur_col = None
+            current_schema = sm.group(1).strip()
+            i += 1
+            continue
+        cm = RECORD_START["Columns"].match(ln)
+        if cm:
+            if cur_col:
+                per_schema[current_schema].append(cur_col)
+            cur_col = {
+                "name": cm.group(1).strip(),
+                "type": "",
+                "is_virtual": False,
+                "formula": "",
+                "initial_value": "",
+                "show_if": "",
+            }
+            i += 1
+            continue
+        if not cur_col:
+            i += 1
+            continue
+        if ln == "Type":
+            cur_col["type"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "Virtual?":
+            v = value_after(lines, i).lower()
+            cur_col["is_virtual"] = v.startswith("y") or v == "true"
+            i += 2
+            continue
+        if ln == "App formula":
+            cur_col["formula"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "Initial value":
+            cur_col["initial_value"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "Show?":
+            cur_col["show_if"] = value_after(lines, i)
+            i += 2
+            continue
+        i += 1
+    if cur_col:
+        per_schema[current_schema].append(cur_col)
+
+    vc_by_schema = Counter()
+    total_vc = 0
+    for sch, cols in per_schema.items():
+        vc_count = sum(1 for c in cols if c["is_virtual"])
+        if vc_count:
+            vc_by_schema[sch] = vc_count
+            total_vc += vc_count
+    return per_schema, total_vc, vc_by_schema
 
 
 def parse_views(lines):
-    """Return list of (name, type)."""
+    """Return list of dicts: name, view_type, for_data."""
     views = []
-    name = None
-    for i, s in enumerate(lines):
-        m = RECORD_START["Views"].match(s)
-        if m:
-            name = m.group(1).strip()
-            views.append([name, ""])
+    cur = None
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        vm = RECORD_START["Views"].match(ln)
+        if vm:
+            if cur:
+                views.append(cur)
+            cur = {"name": vm.group(1).strip(), "view_type": "", "for_data": ""}
+            i += 1
             continue
-        if views and s == "View type":
-            views[-1][1] = value_after(lines, i)
+        if not cur:
+            i += 1
+            continue
+        if ln == "View type":
+            cur["view_type"] = value_after(lines, i)
+            i += 2
+            continue
+        if ln == "For this data":
+            cur["for_data"] = value_after(lines, i)
+            i += 2
+            continue
+        i += 1
+    if cur:
+        views.append(cur)
     return views
 
 
-def workbook_of(source_path):
-    """Group heuristic: first path segment ~ the workbook/data file."""
-    if not source_path:
-        return "(blank)"
-    seg = source_path.strip().strip("/").split("/")[0]
-    return seg or "(root)"
+def parse_simple_names(lines, section_key):
+    """Return list of record names for sections where names suffice for summary counts."""
+    names = []
+    rx = RECORD_START[section_key]
+    for ln in lines:
+        m = rx.match(ln)
+        if m:
+            names.append(m.group(1).strip())
+    return names
+
+
+def summarize(tables, per_schema, total_vc, vc_by_schema, views, slices, actions, format_rules):
+    """Generate Markdown summary containing vital audit signals."""
+    total_tables = len(tables)
+    total_cols = sum(len(cols) for cols in per_schema.values())
+    view_types = Counter(v["view_type"] for v in views if v.get("view_type"))
+
+    # Group tables by data source & workbook
+    by_source = defaultdict(list)
+    by_path = defaultdict(list)
+    for t in tables:
+        src = t["data_source"] or "(unspecified)"
+        by_source[src].append(t["name"])
+        pth = t["source_path"] or "(none)"
+        by_path[(src, pth)].append(t["name"])
+
+    lines = []
+    lines.append("# AppSheet Documentation Export Summary\n")
+    lines.append("## Overall Counts\n")
+    lines.append(f"- **Tables:** {total_tables}")
+    lines.append(f"- **Schemas / Column sets:** {len(per_schema)}")
+    lines.append(f"- **Total Columns:** {total_cols} (Physical: {total_cols - total_vc}, **Virtual: {total_vc}**)")
+    lines.append(f"- **Slices:** {len(slices)}")
+    lines.append(f"- **Views:** {len(views)}")
+    lines.append(f"- **Actions:** {len(actions)}")
+    lines.append(f"- **Format Rules:** {len(format_rules)}\n")
+
+    lines.append("## Virtual Column Leaderboard (Top Sync-Cost Suspects)\n")
+    if vc_by_schema:
+        lines.append("| Schema / Table | Virtual Columns | Total Columns | % Virtual |")
+        lines.append("|---|---|---|---|")
+        for sch, count in vc_by_schema.most_common(20):
+            tot = len(per_schema[sch])
+            pct = (count / tot * 100) if tot else 0
+            lines.append(f"| `{sch}` | **{count}** | {tot} | {pct:.0f}% |")
+    else:
+        lines.append("No virtual columns detected.\n")
+
+    lines.append("\n## Data Sources & Workbook Write-Contention\n")
+    lines.append("| Data Source | Workbook / Path | Tables in Workbook | Risk |")
+    lines.append("|---|---|---|---|")
+    for (src, pth), tbls in sorted(by_path.items(), key=lambda x: -len(x[1])):
+        risk = "⚠️ Contention" if len(tbls) >= 4 and "google" in src.lower() else "Normal"
+        tbl_str = ", ".join(f"`{t}`" for t in tbls[:6])
+        if len(tbls) > 6:
+            tbl_str += f" (+{len(tbls)-6} more)"
+        lines.append(f"| {src} | `{pth}` | {tbl_str} | {risk} |")
+
+    lines.append("\n## View Types Distribution\n")
+    lines.append("| View Type | Count | Render Risk (>1k rows) |")
+    lines.append("|---|---|---|")
+    for vt, count in view_types.most_common():
+        risk_note = "⚠️ High render cost" if vt in ("map", "calendar", "card") else "Standard"
+        lines.append(f"| `{vt}` | {count} | {risk_note} |")
+
+    return "\n".join(lines)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Normalize an AppSheet Documentation export.")
-    ap.add_argument("appdoc", help="Path to the Documentation export (.txt).")
-    ap.add_argument("--out", help="Output directory (default <appdoc>_parsed/).")
-    args = ap.parse_args()
+    p = argparse.ArgumentParser(description="Parse an AppSheet Documentation export into readable audit signals.")
+    p.add_argument("appdoc", help="Path to exported documentation text file.")
+    p.add_argument("--out", default=None, help="Output directory (default: <appdoc>_parsed).")
+    args = p.parse_args()
 
-    if not os.path.isfile(args.appdoc):
-        sys.exit(f"File not found: {args.appdoc}")
-    out = args.out or (os.path.splitext(args.appdoc)[0] + "_parsed")
-    os.makedirs(out, exist_ok=True)
+    if not os.path.exists(args.appdoc):
+        print(f"Error: file not found: {args.appdoc}", file=sys.stderr)
+        sys.exit(1)
 
-    with open(args.appdoc, encoding="utf-8", errors="replace") as f:
-        raw = f.readlines()
-    lines = denoise(raw)
+    outdir = args.out or (os.path.splitext(args.appdoc)[0] + "_parsed")
+    os.makedirs(outdir, exist_ok=True)
 
-    sections = split_sections(lines)
+    with open(args.appdoc, "r", encoding="utf-8", errors="replace") as f:
+        raw_lines = f.readlines()
 
-    # Write normalized per-section text for the agent to read in targeted pieces.
-    file_map = {
-        "Tables": "tables.txt", "Columns": "columns.txt", "Slices": "slices.txt",
-        "Views": "views.txt", "Format Rules": "format_rules.txt", "Actions": "actions.txt",
-    }
-    for sec, fname in file_map.items():
-        with open(os.path.join(out, fname), "w", encoding="utf-8") as f:
-            f.write("\n".join(sections.get(sec, [])))
+    clean_lines = denoise(raw_lines)
+    sections = split_sections(clean_lines)
 
-    # Aggregates.
-    per_schema, vc_total = parse_columns(sections.get("Columns", []))
+    # Dump per-section denoised text files
+    for sec_name, sec_lines in sections.items():
+        fname = sec_name.lower().replace(" ", "_") + ".txt"
+        with open(os.path.join(outdir, fname), "w", encoding="utf-8") as f:
+            f.write("\n".join(sec_lines))
+
     tables = parse_tables(sections.get("Tables", []))
-    slices = parse_named(sections.get("Slices", []), "Slices")
+    per_schema, total_vc, vc_by_schema = parse_columns(sections.get("Columns", []))
     views = parse_views(sections.get("Views", []))
-    actions = parse_named(sections.get("Actions", []), "Actions")
-    rules = parse_named(sections.get("Format Rules", []), "Format Rules")
+    slices = parse_simple_names(sections.get("Slices", []), "Slices")
+    actions = parse_simple_names(sections.get("Actions", []), "Actions")
+    format_rules = parse_simple_names(sections.get("Format Rules", []), "Format Rules")
 
-    total_cols = sum(v["columns"] for v in per_schema.values())
-    vc_board = sorted(
-        ((s, v["virtual"], v["columns"]) for s, v in per_schema.items()),
-        key=lambda x: x[1], reverse=True,
-    )
-    by_source = Counter(t["source"] or "(blank)" for t in tables)
-    by_workbook = Counter(workbook_of(t["source_path"]) for t in tables)
-    view_types = Counter(t for _, t in views)
+    # Write summary.md
+    summary_md = summarize(tables, per_schema, total_vc, vc_by_schema, views, slices, actions, format_rules)
+    with open(os.path.join(outdir, "summary.md"), "w", encoding="utf-8") as f:
+        f.write(summary_md)
 
-    app = {
+    # Write app.json
+    app_data = {
         "tables": tables,
-        "counts": {
-            "tables": len(tables), "columns": total_cols, "virtual_columns": vc_total,
-            "slices": len(slices), "views": len(views), "actions": len(actions),
-            "format_rules": len(rules),
-        },
-        "vc_leaderboard": [
-            {"schema": s, "virtual": v, "columns": c} for s, v, c in vc_board if v
-        ],
-        "tables_by_source": dict(by_source),
-        "tables_by_workbook": dict(by_workbook),
-        "view_types": dict(view_types),
+        "views": views,
+        "slice_names": slices,
+        "action_names": actions,
+        "format_rule_names": format_rules,
+        "vc_leaderboard": dict(vc_by_schema.most_common()),
+        "total_virtual_columns": total_vc,
     }
-    with open(os.path.join(out, "app.json"), "w", encoding="utf-8") as f:
-        json.dump(app, f, indent=2, ensure_ascii=False)
+    with open(os.path.join(outdir, "app.json"), "w", encoding="utf-8") as f:
+        json.dump(app_data, f, indent=2)
 
-    # Human summary.
-    lines_out = []
-    w = lines_out.append
-    w("# AppSheet app audit — parsed signals\n")
-    c = app["counts"]
-    w(f"- Tables: **{c['tables']}**")
-    w(f"- Columns: **{c['columns']}**")
-    w(f"- Virtual columns: **{c['virtual_columns']}**  "
-      f"(~{(100*c['virtual_columns']//c['columns']) if c['columns'] else 0}% of all columns)")
-    w(f"- Slices: **{c['slices']}**  |  Views: **{c['views']}**  "
-      f"|  Actions: **{c['actions']}**  |  Format rules: **{c['format_rules']}**\n")
-
-    w("## Virtual-column leaderboard (biggest sync-time suspects first)\n")
-    w("| Table/schema | Virtual cols | Total cols |")
-    w("|---|---|---|")
-    for s, v, col in vc_board[:20]:
-        if v:
-            w(f"| {s} | {v} | {col} |")
-    w("")
-
-    w("## Tables by data source\n")
-    for src, n in by_source.most_common():
-        w(f"- {src}: {n}")
-    w("")
-    w("## Tables grouped by workbook / source path "
-      "(same workbook = shared write lock = contention risk)\n")
-    for wb, n in by_workbook.most_common():
-        w(f"- {wb}: {n} table(s)")
-    w("")
-    w("## View-type distribution\n")
-    for vt, n in view_types.most_common():
-        w(f"- {vt or '(unset)'}: {n}")
-    w("")
-    w("---\n")
-    w("Normalized per-section text is in this folder: tables.txt, columns.txt, "
-      "slices.txt, views.txt, format_rules.txt, actions.txt. Read the relevant "
-      "one for expression-level review; app.json has the machine-readable structure.")
-
-    with open(os.path.join(out, "summary.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(lines_out))
-
-    print(f"Parsed OK -> {out}")
-    print(f"  tables={c['tables']} columns={c['columns']} "
-          f"virtual={c['virtual_columns']} slices={c['slices']} "
-          f"views={c['views']} actions={c['actions']}")
+    print(f"Parsed successfully -> {outdir}/")
+    print(f"  - Summary: {outdir}/summary.md")
+    print(f"  - JSON:    {outdir}/app.json")
 
 
 if __name__ == "__main__":

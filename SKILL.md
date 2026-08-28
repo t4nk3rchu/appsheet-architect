@@ -1,191 +1,110 @@
 ---
-name: appsheet-architect
-description: >-
-  Design, build, audit, refactor, and review Google AppSheet apps for fast sync,
-  low operating cost, and enterprise scale. Use this whenever the work touches
-  AppSheet architecture or performance — slow sync or sync timeouts, virtual
-  columns, security filters, slices, Ref/dereference/LOOKUP/SELECT/FILTER
-  expressions, keys/UNIQUEID, Google Sheets vs AppSheet Database vs Cloud SQL vs
-  BigQuery, data partitions, workbook write contention, bots/automation limits,
-  Apps Script offload, or a Documentation export (appdoc) to analyze. Trigger it
-  for "my AppSheet app is slow", "reduce sync time", "scale this app", "review
-  this expression/virtual column", "design an AppSheet data model", or "cut our
-  AppSheet cost" — even when the user doesn't say the word "architecture".
+name: appsheet
+description: Use when building Google AppSheet applications, writing expressions (SELECT, LOOKUP, IFS, REF_ROWS, FILTER, USEREMAIL, CONTEXT, dereferencing), configuring automations, bots, or webhooks, designing relational schemas (Refs, Keys, Labels, Virtual Columns, Slices), implementing security boundaries (Security Filters, RBAC, column permissions), designing rich UI/UX with Dynamic SVGs, HTML formatting in LongText, and QuickChart, optimizing sync performance (heavy compute formula alternatives, Enum base type Ref to suppress REF_ROWS, 3-tier denormalization, SQL pushdown, compute budgets, delta sync, Address geocoding tax), troubleshooting Google Sheets concurrency and missing rows, generating browser extension changesets for DOM automation, or integrating via the AppSheet REST API
 ---
 
-# AppSheet Architect
+# Google AppSheet
 
-Design, optimize, and refactor AppSheet systems for **maximum sync speed, low
-operational cost, and enterprise scalability**. This skill encodes how AppSheet
-*actually* behaves under load so you make changes that move the needle instead of
-guessing.
+## Overview
+Google AppSheet is a no-code development platform for creating web and mobile applications from spreadsheet and database backends (Google Sheets, Cloud SQL, BigQuery, Excel). Core mechanics center around relational schema definition, reactive expression formulas, server-side security boundaries, client-side dynamic UI (HTML/SVG), sync performance optimization, event-driven automation bots, and automated DOM changesets.
 
-## The one mental model everything hangs on
+## When to Use
+Use this skill when:
+- Writing or debugging AppSheet expressions (`SELECT`, `LOOKUP`, `IFS`, `REF_ROWS`, `FILTER`, `USEREMAIL`, `CONTEXT`, dereferencing)
+- Refactoring heavy compute formulas (`MAXROW`, nested `SELECT`, deep dereferencing) into performant $O(1)$ alternatives
+- Designing relational tables, primary keys (`UNIQUEID()` for transactions, `Email` for Workspace `Users`), labels, and `Ref` vs `Enum (Base Type Ref)` columns
+- Implementing the 3-Tier Pragmatic Denormalization architecture (Write-Time Snapshots, Event-Driven Bot Rollups, Slice Projections)
+- Designing rich UI/UX using supported HTML tags in `LongText` columns (whitelisted tags vs stripped CSS), zero-latency Dynamic SVGs (KPI cards, radial progress gauges, rating stars, status badges), and QuickChart.io
+- Investigating backend concurrency issues (e.g., missing rows during concurrent multi-user submissions in Google Sheets)
+- Auditing large app configurations using the Documentation Export Parser (`scripts/parse_appdoc.py`)
+- Emitting machine-executable structural changesets for the **AppSheet Copilot / Assistant** Chrome extension (`references/extension-changeset.md`)
+- Deciding between Virtual Columns, Physical Columns, Slices, and Security Filters
+- Implementing security boundaries (Security Filters vs Slices vs Show_If), Role-Based Access Control (RBAC), and anti-deadlock rules
+- Optimizing sync speed, SQL pushdown for database sources, virtual column compute budgets, delta sync, and eliminating hidden costs (e.g. `Address` geocoding tax)
+- Configuring Automation Bots (Data change events, scheduled reports, webhook notifications, Google Apps Script tasks, template generation)
+- Integrating external services via the AppSheet REST API v2 (`/Action`, `Add`, `Edit`, `Delete`, `Find`)
 
-**AppSheet is a distributed system, not a spreadsheet front-end.** The entire
-working data set each user is allowed to see is **downloaded and cached on their
-device** (browser cache / mobile SQLite) so the app is interactive and works
-offline. The app never talks to the data provider directly — it talks to the
-AppSheet server, which brokers the provider.
+When NOT to use:
+- Generic Google Apps Script projects with no AppSheet app interaction
+- Direct SQL migrations or database administration outside of AppSheet table schemas
 
-Three consequences drive every decision in this skill:
+## Quick Reference & Formula Cheat Sheet
 
-1. **Sync time ∝ how much data + how much per-row computation** each user's device
-   must pull and rebuild on every sync. Shrink one or both, or move the work off
-   the sync path. Nothing else matters as much.
-2. **There are three separate cost buckets. Know which one you're paying into:**
-   - **Sync-time** — paid by *every user on every sync*. Virtual columns,
-     security-filter evaluation, table fetches. **The expensive one. Attack it first.**
-   - **Edit-time** — paid *once, by the editing user*, when a row is created/updated.
-     Physical-column App Formulas and Initial Values live here. Moving work from
-     sync-time to edit-time is the single most repeated win in this skill.
-   - **Backend/quota** — bots, Apps Script, Sheets API calls. Off the client
-     entirely, but bounded by hard limits (timeouts, daily caps).
-3. **Concurrency is governed by the data source, not by AppSheet.** Google Sheets
-   locks the *entire workbook* per write; a real SQL database uses row-level locks.
-   The platform scales to any audience; your backend is the ceiling.
+| Task | Syntax | Example |
+| :--- | :--- | :--- |
+| **Filter Rows** | `SELECT(Table[Column], [Condition], [DistinctOnly])` | `SELECT(Orders[OrderID], [Status] = "Open")` |
+| **Single Lookup** | `LOOKUP(Value, Table, LookupColumn, ResultColumn)` | `LOOKUP([CustomerID], "Customers", "CustomerID", "Email")` |
+| **Dereference (Parent)** | `[RefColumn].[TargetColumn]` | `[CustomerRef].[BillingAddress]` |
+| **Parent-Child Link** | `REF_ROWS("ChildTable", "ParentRefColumn")` | `REF_ROWS("OrderDetails", "OrderID")` |
+| **Filter Row Keys** | `FILTER("Table", [Condition])` | `FILTER("Tasks", [Status] = "Pending")` |
+| **Branching Logic** | `IFS(cond1, res1, cond2, res2, TRUE, default)` | `IFS([Score] >= 90, "A", [Score] >= 80, "B", TRUE, "C")` |
+| **User Email** | `USEREMAIL()` | `[AssignedTo] = USEREMAIL()` |
+| **View / Context** | `CONTEXT("View")` / `CONTEXT("ViewType")` | `CONTEXT("ViewType") = "Form"` |
+| **State Transition** | `[_THISROW_BEFORE].[Col] <> [_THISROW_AFTER].[Col]` | `[_THISROW_BEFORE].[Status] <> "Done"` |
+| **Primary Key ID** | `UNIQUEID()` (Initial Value) | `UNIQUEID()` |
+| **Dynamic SVG** | `CONCATENATE("data:image/svg+xml;utf8,<svg ...", ... , "</svg>")` | (See UI/UX Guide for templates) |
+| **Sync Projection** | $T_{\text{sync}} \approx N/3 + (R_{\max} \times C_{\max})/5000$ seconds | Quick baseline estimate |
 
-Realistic target: **3–5 s sync.** AppSheet apps essentially never sync reliably
-below ~2 s, so chasing sub-2 s is wasted effort — aim for 3–5 s and stop.
+## Architecture & Decision Guides
 
-## How to use this skill: pick the mode
+### Security Boundary: Security Filter vs Slice vs Show_If
+| Mechanism | Evaluation Layer | Data Downloaded to Device? | Security Boundary? | Primary Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| **Security Filter** | **Server / Cloud DB** | ❌ NO | ✅ **TRUE SECURITY** | Multi-tenant isolation, confidential records, sync reduction |
+| **Slice** | **Client Device** | ✅ YES (all rows downloaded) | ❌ **UI ONLY** | Tab views, stage filtering, subset workflows |
+| **Show_If / Hide** | **Client Device** | ✅ YES (column in memory) | ❌ **UI ONLY** | Form layout, conditional inputs |
 
-| The task is… | Go to | First action |
-|---|---|---|
-| **Audit / optimize / refactor an existing app** — "it's slow", "reduce sync", "scale it", "cut cost" | `references/audit-refactor.md` | Get a **Documentation export** and run `scripts/parse_appdoc.py` |
-| **Design a new app, table, or feature** from requirements | `references/design.md` | Model the data first — 80% of success is the data model |
-| **Look up an AppSheet formula/function or write an expression** | `references/expressions.md` | Consult the complete formula catalog with bilingual explanations, syntax, and performance notes |
-| **Choose or change the data source**, or **write Apps Script / bots** to offload work | `references/data-and-backend.md` | Locate the app on the scaling ladder |
-| **Review a single expression, virtual column, slice, or security filter** | `references/diagnostics.md` §Anti-patterns & `references/expressions.md` | Match it against the catalog, name the smell, give the fix |
-| **Produce or apply a changeset** for the AppSheet Assistant extension (user has it / wants "a JSON I can apply") | `references/extension-changeset.md` | Emit one strict-JSON `{"changes":[…]}` per that spec — don't ask the user to re-explain the format |
+### Heavy Compute Formulas vs Fast Alternatives
+| Heavy Formula | Bottleneck | Fast Alternative | Performance Gain |
+| :--- | :--- | :--- | :--- |
+| `MAXROW("History", "Time", [ID] = [_THISROW].[ID])` in Virtual Column | $O(N \times M)$ scan per row on every sync | Physical `LatestRef` column updated by Bot on Row Add | **$100\times$ faster** ($O(1)$ pointer read) |
+| `SUM(SELECT(Items[Total], [OrderID] = [_THISROW].[OrderID]))` | Full table scan per row | Reverse-Ref dereference: `SUM([Related Items][Total])` | **$50\times$ faster** (uses internal pointer array) |
+| Repeated `LOOKUP(USEREMAIL(), "Users", "Email", "Role")` | Linear scan on every rule evaluation | `INDEX(Current_User[Role], 1)` on 1-row Slice | Instant in-memory cache read |
+| `ORDERBY(SELECT(...))` inside formula | In-memory sort on every recalculation | Use Slice with native sort order | Reduces mobile CPU throttling |
+| Native `Ref` on 15 child tables | Auto-generates 15 `REF_ROWS()` VCs on Parent | Use `Enum` (Base Type: `Ref`) for utility links | Suppresses unwanted VCs; saves sync memory |
 
-**`references/diagnostics.md` and `references/expressions.md` form the shared knowledge base** — the sync/cost model
-in full, the ranked anti-pattern catalog (~40 smells with fixes), every hard limit, and the complete AppSheet function catalog.
-All modes cite them. Read the mode file for your task **plus** diagnostics.md and expressions.md when working with expressions.
+### Google Sheets Multi-User Concurrency & Missing Rows Prevention
+| Root Cause of Missing Rows | Mechanism | Required Fix |
+| :--- | :--- | :--- |
+| **Premature Browser/App Closure** | Offline sync queue in IndexedDB dropped before sending | Turn OFF `Delayed Sync`; wait for sync spinner |
+| **API `appendCells` Index Lag** | Google Sheets lacks row-level ACID write locks | For >10 concurrent active field writers, migrate to **Cloud SQL** |
+| **Ghost Cells in Trailing Grid Rows** | Formulas/borders in empty rows fool AppSheet to write at row 1000+ | Delete empty rows; use `ARRAYFORMULA` in Row 1 only |
+| **Post-Write Security Filter Mismatch** | Row written to Sheet but filtered out from app view by filter | Verify table Security Filter criteria |
+| **Key Collisions from `=MAX()+1`** | 2 users get same ID; 2nd user overwrites 1st user | Set Primary Key `Initial Value` strictly to **`UNIQUEID()`** |
 
-## Reviewing an expression right now (the fast path)
+## Common Mistakes & Anti-Patterns
 
-If the user just pasted an expression, a virtual column, or a security filter and
-wants it reviewed, you don't need a whole mode. Do this:
+### 1. Relying on Slices or Show_If for Security (Data Leak)
+- ❌ **Wrong:** Filtering confidential salary records using a Slice or `Show_If` formula (data is still downloaded to device HTML5 storage and inspectable).
+- ✅ **Right:** Apply a server-side **Security Filter** on the table (`[EmployeeEmail] = USEREMAIL()` or `LOOKUP(USEREMAIL(), "Users", "Email", "Role") = "HR_Admin"`).
 
-1. **Name the smell** using `references/diagnostics.md` §Anti-patterns.
-2. **Say which cost bucket it hits** (sync-time is the one that hurts).
-3. **Give the concrete fix**, rewritten.
+### 2. Using `LOOKUP()` instead of Dereferencing
+- ❌ **Wrong:** `LOOKUP([CustomerRef], "Customers", "CustomerID", "Email")` (causes extra table scan)
+- ✅ **Right:** `[CustomerRef].[Email]` (uses pre-built relational index instantly)
 
-The highest-value things to catch on sight:
+### 3. Circular Security Filter Deadlock (Anti-Pattern F4)
+- ❌ **Wrong:** Referencing a Slice inside the Security Filter of the same table (`IN([ID], ActiveSlice[ID])`) $\to$ causes recursive macro-expansion compiler loop and 120s sync timeout.
+- ✅ **Right:** Reference the physical column condition directly in the Security Filter (`[Status] = "Active"`).
 
-- **`SELECT` / `FILTER` / `LOOKUP` / `MAXROW` / `MINROW` inside a virtual column,
-  a format rule, or `Show_If`/`Valid_If`.** These all scan a table under the hood
-  and are recomputed for every row on every sync. This is the #1 cause of slow
-  apps. Fix: move to a physical column with an App Formula (computes on edit, not
-  sync), or dereference a Ref, or use a single-row slice + `INDEX(...,1)`.
-- **A `LOOKUP()` where a Ref relationship already exists.** Replace with
-  dereference `[RefColumn].[Attribute]` — it reuses an in-memory index (O(1)) vs
-  a full scan.
-- **A key that is `_RowNumber`, a sheet formula, an editable field, or generated
-  in App Formula.** Keys must be stable. Use `UNIQUEID()` in **Initial Value**.
-- **A security filter using `OR()` / `NOT()` / complex logic, or on a Google
-  Sheet.** Only simple `=` / `IN` / `AND` filters push down to a SQL database;
-  nothing pushes down on a Sheet (the whole sheet is read first).
-- **An `Address`-type column on a large table.** It spawns a hidden geocoding
-  virtual column that re-geocodes every row every sync. This one fix took a
-  40k-row app from minutes to ~0.5 s.
+### 4. Hidden Address Geocoding Tax (Anti-Pattern H1)
+- ❌ **Wrong:** Leaving columns as `Address` on 10k+ row tables (triggers hidden `[internal] GeoCodeAddressColumn` that re-geocodes every row on every sync).
+- ✅ **Right:** Convert to `Text` with a Maps URL Action or pre-compute `LatLong` once on write.
 
-## Deliverables — match the mode
+### 5. Breaking SQL Pushdown in Security Filters
+- ❌ **Wrong:** `OR([Status] = "Active", LEN([Title]) > 10)` in SQL security filters (forces AppSheet to fetch millions of rows and filter in memory).
+- ✅ **Right:** Use pushdown-compatible expressions: `AND([Status] = "Active", [AssignedTo] = USEREMAIL())`.
 
-Produce the artifact the mode calls for, not a wall of prose:
+## Reference Guides & Tools
 
-- **Audit** → a findings report: each finding ranked by impact, with *evidence*
-  (from the Performance Analyzer or the parsed export), the cost bucket it hits,
-  and the fix. Lead with the top 3 wins.
-- **Refactor** → a step-by-step plan with **exact editor steps** and a safe rollout
-  (validate on a copy, repoint, smoke-test). See the template in
-  `references/audit-refactor.md`.
-- **Design** → a build spec: data model (tables, keys, refs), slices, security
-  filters, views, automation — with the reasoning, ready for a developer or for
-  you to implement step-by-step in the editor.
-- **Backend code** → Apps Script / bot logic that respects the automation limits,
-  with the sync/async and trigger-column decisions made explicitly.
+For complete specifications, syntax details, tools, and real-world examples, consult the dedicated files in this skill:
 
-## Hard constraints — do not get these wrong
-
-- **There is no *official* API that edits an app's structure.** Tables, columns,
-  views, actions, and bots are built in the GUI editor; the AppSheet API only
-  does row CRUD. By default your output is an artifact: a plan, a spec, editor
-  steps, or code. **Exception:** the *AppSheet Assistant* browser extension can
-  replay a structural changeset into the editor DOM — see "Applying changes with
-  the AppSheet Assistant extension" below. Even then the user must click Save,
-  and it edits structure only (never rows).
-- **Always measure before prescribing.** The Performance Analyzer
-  (Manage → Monitor → Performance Profile) attributes time per step. Uncheck
-  "Standard view" to expose hidden costs like the Address geocoder. Never claim a
-  fix's impact you haven't grounded in a measurement or a source in diagnostics.md.
-- **Numbers change; verify freshness for anything load-bearing.** Plan-tiered
-  limits and backend behavior shift over time. The figures in diagnostics.md are
-  captured with sources; if a decision hinges on a current limit, confirm it
-  against AppSheet Help rather than asserting from memory.
-- **Every AppSheet expression uses `[Column]` bracket syntax and AppSheet's
-  function list** — it is not SQL, JavaScript, or spreadsheet formula language,
-  even though it borrows names. When unsure of a function's exact behavior, say so.
-
-## The parser
-
-`scripts/parse_appdoc.py` turns an AppSheet **Documentation export** (Editor →
-Manage → Author → *Documentation*, saved as text) into normalized, readable
-per-section files plus aggregate signals an audit needs. Run:
-
-```bash
-python scripts/parse_appdoc.py <appdoc.txt> --out <outdir>
-```
-
-It emits `summary.md` (counts, the **virtual-column leaderboard**, tables grouped
-by data source and by workbook to spot write contention, view-type mix),
-`app.json` (machine-readable), and denoised `tables.txt` / `columns.txt` /
-`slices.txt` / `views.txt` / `format_rules.txt` / `actions.txt` for expression-level
-reading. It counts across the whole app (which humans and LLMs do badly over
-100k+ lines) and leaves the reasoning to you. Caveat: workbook grouping from
-`Source Path` is approximate — the export doesn't always carry the file ID, so
-confirm real workbook boundaries in the editor before acting on contention findings.
-
-## Applying changes with the AppSheet Assistant extension
-
-Normally your design/refactor output is a spec the user executes by hand in the
-editor. When the user has the **AppSheet Assistant** browser extension (a
-Firefox/Chrome sidebar that drives the AppSheet editor UI), you can instead hand
-them a **changeset JSON** it will replay into the editor — turning a plan into
-near-one-click changes. Use this when the user says they have the extension or
-asks for "a changeset / JSON I can apply", or when a refactor is many small
-mechanical edits (retype columns, add slices/actions/format rules, set security
-filters).
-
-What it can apply (structure only — never row data, and the user always clicks
-**Save** in the editor afterward):
-
-- `set_column` (type, App formula, Valid If, Show/Editable/Require/Reset, Enum/EnumList base-type Ref, and any type-specific property), `add_virtual_column`
-- `set_table` (security filter, "are updates allowed")
-- `add_view` / `set_view` — all 11 view types. `add_view` needs `name`+`viewType`+`table` (table **or slice**; dashboards omit `table`); `set_view` needs an **exact existing** `view` name. Sort by (any view); **Group by / Group aggregate on `table`/`deck` only — never on charts**. **`position:"ref"` replaces the system-generated Ref-navigation view for that table.** For secondary/filtered views on the same table: use `position:"menu"` + `showIf` guard (Pattern B), or — cleanest for dashboard/chart children — bind the view to a **no-filter slice** of that table instead of the base table; slice name ≠ table name so AppSheet never treats it as a Ref target (Pattern C). Only use `position:"ref"` when explicitly replacing the default detail (Pattern A). Full decision tree in `references/extension-changeset.md`. Plus:
-  - **dashboards** (omit `table`; embed views via `viewEntries` `[{view,size}]`)
-  - **charts** (`chartType` exact label + `chartColumns`; columns filtered by type — categorical for Histogram/Pie/Donut, Number for Col/Row Series/Scatter; only Aggregate Pie/Donut sum a value across rows — Col/Row Series plot one bar per row, so pre-aggregate via a slice/summary table for "SUM by category")
-  - **table column show/hide** (`columnOrder` auto/manual + `viewColumns`; reorder not yet supported)
-  - **any other view property** via the `properties` escape-hatch keyed by exact editor label (map `Map column`, calendar `Start date`, deck headers, chart `Show legend`, …)
-- `add_slice` / `set_slice` (Row filter condition)
-- `add_action` / `set_action` (all action types incl. COMPOSITE/grouped, assignments, REF_ACTION)
-- `add_format_rule` / `set_format_rule`
-
-How to produce it: emit **one strict-JSON object** `{"changes":[…]}` following the
-op/field spec. **The authoritative format and per-op field list are embedded in
-this skill at `references/extension-changeset.md` — read it and follow it exactly.**
-Key rules: names must match the live schema verbatim; expressions use `[Column]`
-syntax with no leading `=`; text literals inside expressions are double-quoted;
-dependencies (COMPOSITE child actions, a dashboard's child views) come earlier in
-the array. The extension validates every name against the live app and applies
-top-to-bottom; unknown names are rejected, label/type mismatches are warnings.
-
-**Do not ask the user to re-explain the changeset format** — it is fully specified
-in `references/extension-changeset.md`. Read that file whenever you produce or
-apply a changeset.
-
-Fit this into the modes: **Design** and **Refactor** deliverables can additionally
-offer a ready-to-apply changeset alongside the human-readable plan. Keep grounding
-the *reasoning* in diagnostics.md — the extension changes *how* the edits land, not
-*which* edits are worth making.
+- [Expression & Function Reference](references/expression-reference.md) — Comprehensive syntax and 2+ real-world examples for every single function (List, Logic, Text, Math, Date/Time, Navigation), type operations, and dereferencing syntax (`[Ref].[Col]`).
+- [Advanced UI/UX, Dynamic SVG & HTML](references/advanced-ui-ux-svg-html.md) — Supported HTML formatting in `LongText` columns (whitelisted tags vs stripped inline CSS), zero-latency Dynamic SVG templates (KPI cards, donut progress gauges, rating stars, status badges, steppers), Do's & Don'ts, and performant QuickChart.io integration.
+- [Database Design, Schema Architecture & Google Sheets Synergy](references/database-design-and-sheets.md) — Relational schema modeling, 3-tier denormalization architecture, table width limits, root cause analysis & debugging protocol for missing rows in Google Sheets multi-user concurrency, and Google Apps Script automation.
+- [Performance, Sync & Scalability Guide](references/performance-optimization.md) — Sync lifecycle breakdown, heavy compute expression catalog & fast alternatives, `Enum (Base Type Ref)` optimization to suppress `REF_ROWS()` virtual columns, SQL pushdown rules, empirical plan thresholds, Address geocoding tax, and view rendering limits.
+- [AppSheet Copilot & Assistant Extension Changeset Spec](references/extension-changeset.md) — Strict-JSON changeset specification (`{"changes": [...]}`) for programmatic DOM automation via the AppSheet Assistant / Copilot Chrome extension.
+- [Documentation Export Parser Tool](scripts/parse_appdoc.py) — Python script to parse, denoise, and analyze 100k+ line AppSheet Documentation exports (`summary.md`, `app.json`, VC leaderboards, workbook write-contention indicators).
+- [Data Modeling & Architecture](references/data-modeling.md) — Relational schema design, Key vs Label rules, Ref columns vs Enum Base Type Ref, Virtual Columns, Slices, and Security Filters.
+- [Security, Authentication & Access Control](references/security-and-access.md) — Authentication providers, Server-side Security Filters, Role-Based Access Control (RBAC), column permissions (`Editable_If`, `Show_If`), circular deadlock prevention, and cross-app bot execution boundaries.
+- [Automation, Bots & Webhooks](references/automation-patterns.md) — Event triggers, bot tasks (Email, Webhook, Apps Script, PDF/CSV generation), and template formatting tags.
+- [REST API v2 Reference](references/api-reference.md) — REST API v2 endpoints, Application Access Keys, and JSON payloads for CRUD actions.
