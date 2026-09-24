@@ -195,12 +195,40 @@ CONCATENATE(
 
 ---
 
+### AppSheet Formula Syntax Rule: Quote Delimiters & Spacing (`' "` and `'"'`)
+
+When constructing dynamic SVGs inside AppSheet's `CONCATENATE()`, the formula tokenizer has strict parsing behaviors regarding adjacent quotes:
+
+1. **Space Between Single Quote & Closing Double Quote (`' "`):**
+   - ❌ **Wrong:** `"<text fill='", IF([Status] = "Active", "#10b981", "#ef4444"), "'>"` $\to$ can trigger formula parser tokenization errors.
+   - ✅ **Right:** `"<text fill=' ", IF([Status] = "Active", "#10b981", "#ef4444"), "'>"` $\to$ inserting a space between `'` and `"` ensures the string token closes cleanly.
+2. **Distinct Double-Quote Token Passing (`'"'`):**
+   - When wrapping HTML `<img>` attributes, pass double quotes as explicit separate tokens rather than raw escape sequences (`\"`):
+     ```appsheet
+     CONCATENATE(
+       "<img style='width: 100%; height: auto;' src=",
+       '"',
+       "data:image/svg+xml;utf8,",
+       ENCODEURL(
+         CONCATENATE(
+           "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 500 400'>",
+           ...
+           "</svg>"
+         )
+       ),
+       '" />'
+     )
+     ```
+
+---
+
 ### What You CAN'T Do in AppSheet SVGs (Traps & Failure Modes)
 
 | ❌ Failure Mode / Trap | Why It Fails in AppSheet | ✅ What To Do Instead |
 | :--- | :--- | :--- |
+| **Adjacent Quote Collisions** (`"fill='"` without space) | AppSheet's tokenizer can misinterpret `'"'` as an invalid string delimiter or escape attempt when splitting formula parameters. | Add a space before closing the string literal (`"fill=' "`) or pass `'"'` as an explicit token. |
 | **Unencoded `#` in Hex Colors** (`fill='#28a745'`) | When not using `ENCODEURL()`, `#` is treated as a URL fragment identifier in mobile WebViews, cutting off the rest of the SVG string and rendering a blank image. | Wrap the entire SVG XML in **`ENCODEURL()`**, or manually encode `#` as `%23` (`fill='%2328a745'`). |
-| **Double Quote Syntax Collisions** | Using unescaped double quotes inside formula strings breaks AppSheet's expression parser. | Use single quotes (`'`) for SVG attributes or double-escaped quotes (`""`) inside string literals. |
+| **Double Quote Syntax Collisions** | Using unescaped double quotes inside formula strings breaks AppSheet's expression parser. | Use single quotes (`'`) for SVG attributes or pass `'"'` as a distinct argument in `CONCATENATE()`. |
 | **Missing `xmlns` Namespace** | Without `xmlns='http://www.w3.org/2000/svg'`, mobile WebViews and some browsers fail to identify the XML as vector graphics and render a broken icon. | Always include `xmlns='http://www.w3.org/2000/svg'` in the root `<svg>` element. |
 | **`<script>` Tags or Event Handlers** | AppSheet and mobile WebViews strip or block JavaScript execution for security. | Use pure declarative SVG vector properties and AppSheet formula conditions (`IFS()`, `IF()`). |
 | **External Fonts** (`@import url(...)`) | WebViews block cross-origin font downloads inside SVG Data URIs, causing text fallback or rendering failure. | Use standard system fonts: `font-family='system-ui, -apple-system, sans-serif'`. |
@@ -228,7 +256,9 @@ CONCATENATE(
 #### ✅ Good SVG Formula (Robust, Universally Compatible with `ENCODEURL()`)
 ```appsheet
 CONCATENATE(
-  "<img style='width: 100%; height: auto;' src=\"data:image/svg+xml;utf8,",
+  "<img style='width: 100%; height: auto;' src=",
+  '"',
+  "data:image/svg+xml;utf8,",
   ENCODEURL(
     CONCATENATE(
       "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>",
@@ -239,13 +269,14 @@ CONCATENATE(
       "</svg>"
     )
   ),
-  "\" />"
+  '" />'
 )
 ```
 *Why it succeeds:*
 1. `ENCODEURL()` handles all `#` hex colors, spaces, and unicode characters automatically.
 2. Proper `xmlns` namespace and `viewBox` ensure flawless vector scaling across all mobile and desktop devices.
-3. `<img style='width: 100%; height: auto;' />` ensures seamless responsive layout in `LongText` HTML views.
+3. Separate `'"'` tokens and space padding ensure clean formula compilation in AppSheet.
+4. `<img style='width: 100%; height: auto;' />` ensures seamless responsive layout in `LongText` HTML views.
 
 ---
 
