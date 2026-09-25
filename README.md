@@ -13,6 +13,24 @@ In Firefox, open the AppSheet Copilot sidebar on your app and set
 **Provider → Coding agent (MCP)**. Then ask Claude Code for a change.
 To upload just the skill to claude.ai, zip the `skills/appsheet/` folder.
 
+## Install in Antigravity
+
+Requires Node.js 18+ and the AppSheet Copilot Firefox add-on (1.4.0+).
+
+Clone this repo into `~/.gemini/config/plugins/appsheet-architect` (global) or `<your workspace>/.agents/plugins/appsheet-architect`:
+
+    git clone https://github.com/t4nk3rchu/appsheet-architect ~/.gemini/config/plugins/appsheet-architect
+
+With the CLI you can then run:
+
+    agy plugins install appsheet-architect
+
+Restart Antigravity; in Firefox set the sidebar's **Provider → Coding agent (MCP)**. Ask the agent to call `appsheet_get_app`.
+
+If the appsheet-copilot tools don't appear, your Antigravity version may not expand `${extensionPath}`: edit `mcp_config.json` and replace it with the plugin folder's absolute path (e.g. `C:/Users/<you>/.gemini/config/plugins/appsheet-architect/mcp/server.mjs`).
+
+Claude Code and Antigravity sessions share one connection: whichever helper starts first relays for the others.
+
 ---
 
 ## 📂 Repository Structure

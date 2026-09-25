@@ -1,0 +1,6 @@
+{
+  "name": "appsheet-architect",
+  "version": "1.0.0",
+  "description": "AppSheet design skill + AppSheet Copilot MCP tools (read the open app, stage and build changes via the AppSheet Copilot Firefox add-on).",
+  "author": { "name": "t4nk3rchu" }
+}
