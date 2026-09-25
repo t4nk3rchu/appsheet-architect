@@ -21,13 +21,17 @@ const isPeerHandshake = (info) => {
   const offered = String(info.req.headers["sec-websocket-protocol"] || "").split(",").map((s) => s.trim());
   return offered.includes(PEER_PROTOCOL);
 };
+// Same rule, from a raw request (handleProtocols/connection get `req`, not `info`).
+const isPeerReq = (req) => isPeerHandshake({ origin: req.headers.origin, req });
 
 export function startBridge({ port, host = "127.0.0.1", link, retryMs = 5000 }) {
   let mode = "starting"; // "starting" | "hub" | "peer"
   let wss = null;
+  let boundServer = null; // the WebSocketServer currently binding or bound, even before "listening" fires
   let peerSocket = null;
   let stopped = false;
   let timer = null;
+  let blockedReason = null; // set when the port is held by something that isn't answering as a hub
   let nextId = 1;
   const pending = new Map(); // id → { resolve, reject, timer }
 
@@ -58,15 +62,20 @@ export function startBridge({ port, host = "127.0.0.1", link, retryMs = 5000 }) 
     const server = new WebSocketServer({
       host, port,
       verifyClient: (info, done) => done(isAllowedOrigin(info.origin) || isPeerHandshake(info), 403),
-      handleProtocols: (protocols) => (protocols.has(PEER_PROTOCOL) ? PEER_PROTOCOL : false),
+      handleProtocols: (protocols, req) => (isPeerReq(req) ? PEER_PROTOCOL : false),
     });
-    server.on("listening", () => { wss = server; mode = "hub"; });
-    server.on("connection", (socket) => {
-      if (socket.protocol === PEER_PROTOCOL) servePeer(socket);
+    boundServer = server;
+    server.on("listening", () => {
+      if (stopped) { server.close(); return; } // close() ran while we were still binding
+      wss = server; mode = "hub"; blockedReason = null;
+    });
+    server.on("connection", (socket, req) => {
+      if (isPeerReq(req)) servePeer(socket);
       else link.attach(socket);
     });
     server.on("error", (err) => {
       wss = null;
+      boundServer = null;
       server.close();
       if (stopped) return;
       if (err.code === "EADDRINUSE") connectAsPeer();
@@ -79,7 +88,7 @@ export function startBridge({ port, host = "127.0.0.1", link, retryMs = 5000 }) 
     mode = "starting";
     const socket = new WebSocket(`ws://${host}:${port}`, PEER_PROTOCOL);
     peerSocket = socket;
-    socket.on("open", () => { mode = "peer"; });
+    socket.on("open", () => { mode = "peer"; blockedReason = null; });
     socket.on("message", (data) => {
       let m;
       try { m = JSON.parse(String(data)); } catch { return; }
@@ -89,6 +98,19 @@ export function startBridge({ port, host = "127.0.0.1", link, retryMs = 5000 }) 
       pending.delete(m.id);
       clearTimeout(p.timer);
       if (m.ok) p.resolve(m.result); else p.reject(new Error(m.error || "The sidebar reported an error."));
+    });
+    // The thing on the port answered with plain HTTP, not a WS upgrade — an
+    // older helper version 403ing us, or an unrelated program. Not a hub we
+    // can ever join, so give a clear error instead of sitting in "starting".
+    socket.on("unexpected-response", (req, res) => {
+      res.resume();
+      req.destroy();
+      if (peerSocket !== socket) return;
+      peerSocket = null;
+      blockedReason = `Port ${port} is held by another program or an older AppSheet helper — restart your coding-agent sessions (or free the port) and try again.`;
+      if (stopped) return;
+      mode = "starting";
+      timer = setTimeout(listenAsHub, retryMs);
     });
     const onDown = () => {
       if (peerSocket !== socket) return; // already replaced
@@ -122,14 +144,15 @@ export function startBridge({ port, host = "127.0.0.1", link, retryMs = 5000 }) 
           socket.send(JSON.stringify({ type: "call", id, tool, args, timeoutMs }));
         });
       }
-      return Promise.reject(new Error(STARTING));
+      return Promise.reject(new Error(blockedReason || STARTING));
     },
     close() {
       stopped = true;
       clearTimeout(timer);
       failPending(MOVED);
-      if (peerSocket) { peerSocket.close(); peerSocket = null; }
-      if (wss) { for (const c of wss.clients) c.terminate(); wss.close(); wss = null; }
+      if (peerSocket) { peerSocket.terminate(); peerSocket = null; }
+      if (boundServer) { for (const c of boundServer.clients) c.terminate(); boundServer.close(); boundServer = null; }
+      wss = null;
       mode = "starting";
     },
   };

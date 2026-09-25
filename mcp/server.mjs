@@ -40234,12 +40234,15 @@ var isPeerHandshake = (info) => {
   const offered = String(info.req.headers["sec-websocket-protocol"] || "").split(",").map((s) => s.trim());
   return offered.includes(PEER_PROTOCOL);
 };
+var isPeerReq = (req) => isPeerHandshake({ origin: req.headers.origin, req });
 function startBridge({ port, host = "127.0.0.1", link: link2, retryMs = 5e3 }) {
   let mode = "starting";
   let wss = null;
+  let boundServer = null;
   let peerSocket = null;
   let stopped = false;
   let timer = null;
+  let blockedReason = null;
   let nextId = 1;
   const pending = /* @__PURE__ */ new Map();
   const failPending = (message) => {
@@ -40272,18 +40275,25 @@ function startBridge({ port, host = "127.0.0.1", link: link2, retryMs = 5e3 }) {
       host,
       port,
       verifyClient: (info, done) => done(isAllowedOrigin(info.origin) || isPeerHandshake(info), 403),
-      handleProtocols: (protocols) => protocols.has(PEER_PROTOCOL) ? PEER_PROTOCOL : false
+      handleProtocols: (protocols, req) => isPeerReq(req) ? PEER_PROTOCOL : false
     });
+    boundServer = server2;
     server2.on("listening", () => {
+      if (stopped) {
+        server2.close();
+        return;
+      }
       wss = server2;
       mode = "hub";
+      blockedReason = null;
     });
-    server2.on("connection", (socket) => {
-      if (socket.protocol === PEER_PROTOCOL) servePeer(socket);
+    server2.on("connection", (socket, req) => {
+      if (isPeerReq(req)) servePeer(socket);
       else link2.attach(socket);
     });
     server2.on("error", (err) => {
       wss = null;
+      boundServer = null;
       server2.close();
       if (stopped) return;
       if (err.code === "EADDRINUSE") connectAsPeer();
@@ -40302,6 +40312,7 @@ function startBridge({ port, host = "127.0.0.1", link: link2, retryMs = 5e3 }) {
     peerSocket = socket;
     socket.on("open", () => {
       mode = "peer";
+      blockedReason = null;
     });
     socket.on("message", (data) => {
       let m;
@@ -40317,6 +40328,16 @@ function startBridge({ port, host = "127.0.0.1", link: link2, retryMs = 5e3 }) {
       clearTimeout(p.timer);
       if (m.ok) p.resolve(m.result);
       else p.reject(new Error(m.error || "The sidebar reported an error."));
+    });
+    socket.on("unexpected-response", (req, res) => {
+      res.resume();
+      req.destroy();
+      if (peerSocket !== socket) return;
+      peerSocket = null;
+      blockedReason = `Port ${port} is held by another program or an older AppSheet helper \u2014 restart your coding-agent sessions (or free the port) and try again.`;
+      if (stopped) return;
+      mode = "starting";
+      timer = setTimeout(listenAsHub, retryMs);
     });
     const onDown = () => {
       if (peerSocket !== socket) return;
@@ -40354,21 +40375,22 @@ function startBridge({ port, host = "127.0.0.1", link: link2, retryMs = 5e3 }) {
           socket.send(JSON.stringify({ type: "call", id, tool, args, timeoutMs }));
         });
       }
-      return Promise.reject(new Error(STARTING));
+      return Promise.reject(new Error(blockedReason || STARTING));
     },
     close() {
       stopped = true;
       clearTimeout(timer);
       failPending(MOVED);
       if (peerSocket) {
-        peerSocket.close();
+        peerSocket.terminate();
         peerSocket = null;
       }
-      if (wss) {
-        for (const c of wss.clients) c.terminate();
-        wss.close();
-        wss = null;
+      if (boundServer) {
+        for (const c of boundServer.clients) c.terminate();
+        boundServer.close();
+        boundServer = null;
       }
+      wss = null;
       mode = "starting";
     }
   };
