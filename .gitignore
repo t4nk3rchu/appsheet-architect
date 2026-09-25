@@ -57,3 +57,5 @@ temp/
 output/
 scratch/
 *.log
+mcp/node_modules/
+__pycache__/
