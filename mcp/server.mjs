@@ -40302,3 +40302,12 @@ server.registerTool("appsheet_get_build_result", {
 }, () => forward("appsheet_get_build_result", 30 * SECONDS)());
 await server.connect(new StdioServerTransport());
 process.stderr.write("appsheet-copilot MCP helper started\n");
+var shuttingDown = false;
+var shutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  bridge.close();
+  process.exit(0);
+};
+process.stdin.on("end", shutdown);
+process.stdin.on("close", shutdown);

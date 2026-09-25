@@ -46,3 +46,16 @@ server.registerTool("appsheet_get_build_result", {
 
 await server.connect(new StdioServerTransport());
 process.stderr.write("appsheet-copilot MCP helper started\n");
+
+// The ws server keeps the event loop alive, so Node won't exit on its own
+// when the MCP client (stdin) goes away — that orphans the helper holding
+// the port. Exit once, on either stdin "end" or "close".
+let shuttingDown = false;
+const shutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  bridge.close();
+  process.exit(0);
+};
+process.stdin.on("end", shutdown);
+process.stdin.on("close", shutdown);
