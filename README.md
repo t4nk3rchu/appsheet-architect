@@ -2,6 +2,17 @@
 
 A comprehensive knowledge base, reference guide, and AI agent skill for designing, auditing, building, and optimizing enterprise-grade **Google AppSheet** applications for **maximum sync speed, robust security, rich UI/UX, and scalability**.
 
+## Install as a Claude Code plugin (skill + AppSheet Copilot tools)
+
+Requires Node.js 18+ on PATH and the AppSheet Copilot Firefox add-on (1.4.0+).
+
+    /plugin marketplace add t4nk3rchu/appsheet-architect
+    /plugin install appsheet-architect@appsheet-architect
+
+In Firefox, open the AppSheet Copilot sidebar on your app and set
+**Provider → Coding agent (MCP)**. Then ask Claude Code for a change.
+To upload just the skill to claude.ai, zip the `skills/appsheet/` folder.
+
 ---
 
 ## 📂 Repository Structure
