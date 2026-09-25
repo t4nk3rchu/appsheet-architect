@@ -108,3 +108,23 @@ For complete specifications, syntax details, tools, and real-world examples, con
 - [Security, Authentication & Access Control](references/security-and-access.md) — Authentication providers, Server-side Security Filters, Role-Based Access Control (RBAC), column permissions (`Editable_If`, `Show_If`), circular deadlock prevention, and cross-app bot execution boundaries.
 - [Automation, Bots & Webhooks](references/automation-patterns.md) — Event triggers, bot tasks (Email, Webhook, Apps Script, PDF/CSV generation), and template formatting tags.
 - [REST API v2 Reference](references/api-reference.md) — REST API v2 endpoints, Application Access Keys, and JSON payloads for CRUD actions.
+
+## Working with the AppSheet Copilot add-on (appsheet_* tools)
+
+When the `appsheet_get_app`, `appsheet_stage_changeset`, `appsheet_build` and
+`appsheet_get_build_result` tools are available, the user has the AppSheet Copilot
+Firefox add-on open on their app. Then:
+
+1. Call `appsheet_get_app` first. Use only the table, column, view, slice, action,
+   format-rule and bot names it returns — never invent names. Keep its `appId`.
+2. Write the changeset exactly per `references/extension-changeset.md`.
+3. Call `appsheet_stage_changeset` with `appId` and the `changes` array. If it
+   reports issues, fix them and stage again.
+4. Tell the user what you staged. Call `appsheet_build` only if they asked you to
+   build; otherwise ask them to review it in the sidebar and click Build now.
+5. After a build, read the per-change results (or `appsheet_get_build_result`),
+   fix failures by staging again, and always remind the user that nothing is
+   saved until they click **Save** in the AppSheet editor.
+
+If a tool says the sidebar isn't connected, ask the user to open the AppSheet
+Copilot sidebar in Firefox and set Provider → Coding agent (MCP).

@@ -57,3 +57,6 @@ temp/
 output/
 scratch/
 *.log
+mcp/node_modules/
+__pycache__/
+.superpowers/

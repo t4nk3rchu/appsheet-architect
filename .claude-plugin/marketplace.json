@@ -1,0 +1,7 @@
+{
+  "name": "appsheet-architect",
+  "owner": { "name": "t4nk3rchu" },
+  "plugins": [
+    { "name": "appsheet-architect", "source": "./", "description": "AppSheet skill + AppSheet Copilot MCP tools" }
+  ]
+}

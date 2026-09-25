@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "appsheet-copilot": { "command": "node", "args": ["${extensionPath}/mcp/server.mjs"] }
+  }
+}

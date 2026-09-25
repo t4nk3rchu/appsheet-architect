@@ -1,0 +1,7 @@
+{
+  "name": "appsheet-architect",
+  "version": "1.0.0",
+  "description": "AppSheet design skill plus tools to read the open AppSheet app and stage/build changes through the AppSheet Copilot Firefox add-on.",
+  "author": { "name": "t4nk3rchu" },
+  "repository": "https://github.com/t4nk3rchu/appsheet-architect"
+}
