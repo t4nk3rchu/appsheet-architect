@@ -5,7 +5,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { SidebarLink, PORT, ANOTHER_SESSION } from "./link.js";
+import { SidebarLink, PORT } from "./link.js";
 import { startBridge } from "./bridge.js";
 
 const link = new SidebarLink();
@@ -15,8 +15,7 @@ const bridge = startBridge({ port: Number(process.env.APPSHEET_COPILOT_PORT) || 
 const text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
 const fail = (message) => ({ ...text(message), isError: true });
 const forward = (tool, timeoutMs) => async (args = {}) => {
-  if (!bridge.listening) return fail(ANOTHER_SESSION);
-  try { return text(await link.call(tool, args, timeoutMs)); }
+  try { return text(await bridge.call(tool, args, timeoutMs)); }
   catch (e) { return fail(e.message); }
 };
 const SECONDS = 1000, MINUTES = 60 * SECONDS;

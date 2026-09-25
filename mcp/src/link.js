@@ -4,7 +4,6 @@
 export const PORT = 47813;
 export const NO_SIDEBAR = "Open the AppSheet Copilot sidebar in Firefox and set Provider → Coding agent (MCP).";
 export const BUSY = "The sidebar is busy with another request.";
-export const ANOTHER_SESSION = "Another coding-agent session has the AppSheet connection — use that session, or close it.";
 
 // Browsers always send Origin on WebSocket upgrades and pages can't forge it,
 // so this keeps web pages out. ponytail: any installed Firefox add-on passes —

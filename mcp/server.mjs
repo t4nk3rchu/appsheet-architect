@@ -40158,7 +40158,6 @@ var StdioServerTransport = class {
 var PORT = 47813;
 var NO_SIDEBAR = "Open the AppSheet Copilot sidebar in Firefox and set Provider \u2192 Coding agent (MCP).";
 var BUSY = "The sidebar is busy with another request.";
-var ANOTHER_SESSION = "Another coding-agent session has the AppSheet connection \u2014 use that session, or close it.";
 var isAllowedOrigin = (origin) => typeof origin === "string" && origin.startsWith("moz-extension://");
 var SidebarLink = class {
   #socket = null;
@@ -40227,42 +40226,150 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // src/bridge.js
+var PEER_PROTOCOL = "appsheet-copilot-peer";
+var STARTING = "Starting up \u2014 try again in a moment.";
+var MOVED = "The AppSheet connection moved \u2014 try again.";
+var isPeerHandshake = (info) => {
+  if (info.origin) return false;
+  const offered = String(info.req.headers["sec-websocket-protocol"] || "").split(",").map((s) => s.trim());
+  return offered.includes(PEER_PROTOCOL);
+};
 function startBridge({ port, host = "127.0.0.1", link: link2, retryMs = 5e3 }) {
-  let wss = null, listening = false, stopped = false, timer = null;
-  const listen = () => {
+  let mode = "starting";
+  let wss = null;
+  let peerSocket = null;
+  let stopped = false;
+  let timer = null;
+  let nextId = 1;
+  const pending = /* @__PURE__ */ new Map();
+  const failPending = (message) => {
+    for (const p of pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error(message));
+    }
+    pending.clear();
+  };
+  const servePeer = (socket) => {
+    socket.on("message", async (data) => {
+      let m;
+      try {
+        m = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (m?.type !== "call") return;
+      try {
+        const result = await link2.call(m.tool, m.args, m.timeoutMs);
+        socket.send(JSON.stringify({ type: "result", id: m.id, ok: true, result }));
+      } catch (e) {
+        socket.send(JSON.stringify({ type: "result", id: m.id, ok: false, error: e.message }));
+      }
+    });
+  };
+  const listenAsHub = () => {
     if (stopped) return;
     const server2 = new import_websocket_server.default({
       host,
       port,
-      verifyClient: (info, done) => done(isAllowedOrigin(info.origin), 403)
+      verifyClient: (info, done) => done(isAllowedOrigin(info.origin) || isPeerHandshake(info), 403),
+      handleProtocols: (protocols) => protocols.has(PEER_PROTOCOL) ? PEER_PROTOCOL : false
     });
     server2.on("listening", () => {
       wss = server2;
-      listening = true;
+      mode = "hub";
     });
-    server2.on("connection", (socket) => link2.attach(socket));
+    server2.on("connection", (socket) => {
+      if (socket.protocol === PEER_PROTOCOL) servePeer(socket);
+      else link2.attach(socket);
+    });
     server2.on("error", (err) => {
-      listening = false;
+      wss = null;
       server2.close();
-      if (err.code === "EADDRINUSE" && !stopped) timer = setTimeout(listen, retryMs);
-      else process.stderr.write(`appsheet-copilot bridge error: ${err.message}
+      if (stopped) return;
+      if (err.code === "EADDRINUSE") connectAsPeer();
+      else {
+        process.stderr.write(`appsheet-copilot bridge error: ${err.message}
 `);
+        mode = "starting";
+        timer = setTimeout(listenAsHub, retryMs);
+      }
     });
   };
-  listen();
+  const connectAsPeer = () => {
+    if (stopped) return;
+    mode = "starting";
+    const socket = new import_websocket.default(`ws://${host}:${port}`, PEER_PROTOCOL);
+    peerSocket = socket;
+    socket.on("open", () => {
+      mode = "peer";
+    });
+    socket.on("message", (data) => {
+      let m;
+      try {
+        m = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (m?.type !== "result") return;
+      const p = pending.get(m.id);
+      if (!p) return;
+      pending.delete(m.id);
+      clearTimeout(p.timer);
+      if (m.ok) p.resolve(m.result);
+      else p.reject(new Error(m.error || "The sidebar reported an error."));
+    });
+    const onDown = () => {
+      if (peerSocket !== socket) return;
+      peerSocket = null;
+      failPending(MOVED);
+      if (stopped) return;
+      mode = "starting";
+      timer = setTimeout(listenAsHub, retryMs);
+    };
+    socket.on("close", onDown);
+    socket.on("error", onDown);
+  };
+  listenAsHub();
   return {
+    get mode() {
+      return mode;
+    },
     get listening() {
-      return listening;
+      return mode === "hub";
     },
     get port() {
-      return wss?.address()?.port;
+      return mode === "hub" ? wss?.address()?.port : port;
+    },
+    call(tool, args, timeoutMs) {
+      if (mode === "hub") return link2.call(tool, args, timeoutMs);
+      if (mode === "peer") {
+        const socket = peerSocket;
+        const id = nextId++;
+        return new Promise((resolve, reject) => {
+          const timer2 = setTimeout(() => {
+            pending.delete(id);
+            reject(new Error(`The sidebar didn't answer in time (${Math.round(timeoutMs / 1e3)} s).`));
+          }, timeoutMs + 2e3);
+          pending.set(id, { resolve, reject, timer: timer2 });
+          socket.send(JSON.stringify({ type: "call", id, tool, args, timeoutMs }));
+        });
+      }
+      return Promise.reject(new Error(STARTING));
     },
     close() {
       stopped = true;
       clearTimeout(timer);
-      listening = false;
-      wss?.close();
-      for (const c of wss?.clients ?? []) c.terminate();
+      failPending(MOVED);
+      if (peerSocket) {
+        peerSocket.close();
+        peerSocket = null;
+      }
+      if (wss) {
+        for (const c of wss.clients) c.terminate();
+        wss.close();
+        wss = null;
+      }
+      mode = "starting";
     }
   };
 }
@@ -40273,9 +40380,8 @@ var bridge = startBridge({ port: Number(process.env.APPSHEET_COPILOT_PORT) || PO
 var text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
 var fail = (message) => ({ ...text(message), isError: true });
 var forward = (tool, timeoutMs) => async (args = {}) => {
-  if (!bridge.listening) return fail(ANOTHER_SESSION);
   try {
-    return text(await link.call(tool, args, timeoutMs));
+    return text(await bridge.call(tool, args, timeoutMs));
   } catch (e) {
     return fail(e.message);
   }
