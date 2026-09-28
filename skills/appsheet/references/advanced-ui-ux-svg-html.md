@@ -74,8 +74,8 @@ CONCATENATE(
 #### Example 3: Rich Media & Direct Hyperlinks
 ```appsheet
 CONCATENATE(
-  "<p><b>Equipment Manual:</b> <a href='", [ManualURL], "'>Open PDF Document</a></p>",
-  "<p><img src='", [DiagramURL], "' width='320' /></p>",
+  "<p><b>Equipment Manual:</b> <a href=' ", [ManualURL], "'>Open PDF Document</a></p>",
+  "<p><img src=' ", [DiagramURL], "' width='320' /></p>",
   "<ul>",
   "<li>Check safety valve before starting.</li>",
   "<li>Verify pressure gauge is calibrated.</li>",
@@ -87,7 +87,7 @@ CONCATENATE(
 
 ### Embedding Dynamic SVGs Directly Inside `LongText` (HTML Format) Columns
 
-While AppSheet's HTML sanitizer strips all inline CSS (`style="..."`), you can **embed fully-styled Dynamic SVGs directly into a `LongText` (format: `HTML`) column** using `<img src='data:image/svg+xml;utf8,<svg ...>...</svg>'>`.
+While AppSheet's HTML sanitizer strips all inline CSS (`style="..."`), you can **embed fully-styled Dynamic SVGs directly into a `LongText` (format: `HTML`) column** using `<img src="data:image/svg+xml;utf8,...">`. The `src` value takes double quotes, because the SVG inside it uses only single quotes.
 
 #### Why This Pattern Is Powerful:
 1. **Bypasses CSS Stripping:** Renders rich colored badges, progress meters, and status pills inline with headings, lists, and tables.
@@ -97,8 +97,8 @@ While AppSheet's HTML sanitizer strips all inline CSS (`style="..."`), you can *
 #### Implementation Rules:
 - Column Type: **`LongText`**
 - Text Format: **`HTML`**
-- Hex Colors: Always encode `#` as **`%23`** (e.g., `%2328a745` for green, `%23dc3545` for red).
-- Quotes: Use single quotes `'` for HTML and SVG attributes inside double-quoted AppSheet string literals.
+- Hex Colors: Wrap the SVG in **`ENCODEURL()`** (or manually encode `#` as **`%23`**).
+- Quotes: Follow the [Critical Quoting Rules](#-critical-quoting-rules-tested-in-appsheet) below — single quotes everywhere inside the SVG, `src=` wrapped in a real double quote supplied by the `'"'` literal.
 
 #### Example 4: Mixed HTML Document with Inline Dynamic SVG Status Badge
 ```appsheet
@@ -107,20 +107,23 @@ CONCATENATE(
   "<p><b>Assigned To:</b> ", [TechnicianName], "<br>",
   "<b>Priority:</b> ", [Priority], "</p>",
   "<p><b>Live Status:</b><br>",
-  "<img src='data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"140\" height=\"32\" viewBox=\"0 0 140 32\">",
-    "<rect width=\"140\" height=\"32\" rx=\"16\" fill=\"",
+  "<img src=", '"', "data:image/svg+xml;utf8,",
+  ENCODEURL(CONCATENATE(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='140' height='32' viewBox='0 0 140 32'>",
+    "<rect width='140' height='32' rx='16' fill=' ",
     IFS(
-      [Status] = "Completed", "%2328a745",
-      [Status] = "In Progress", "%23ffc107",
-      TRUE, "%23dc3545"
+      [Status] = "Completed", "#28a745",
+      [Status] = "In Progress", "#ffc107",
+      TRUE, "#dc3545"
     ),
-    "\" />",
-    "<text x=\"70\" y=\"21\" font-family=\"Arial, sans-serif\" font-size=\"13\" font-weight=\"bold\" fill=\"",
-    IFS([Status] = "In Progress", "%23212529", TRUE, "%23ffffff"),
-    "\" text-anchor=\"middle\">",
+    "'/>",
+    "<text x='70' y='21' font-family='Arial, sans-serif' font-size='13' font-weight='bold' text-anchor='middle' fill=' ",
+    IFS([Status] = "In Progress", "#212529", TRUE, "#ffffff"),
+    "'>",
     UPPER([Status]),
-    "</text>",
-  "</svg>' /></p>",
+    "</text></svg>"
+  )),
+  '" /></p>',
   "<blockquote>", [CustomerNotes], "</blockquote>"
 )
 ```
@@ -132,16 +135,24 @@ CONCATENATE(
   "<table>",
   "<tr><th>Milestone</th><th>Progress</th><th>Weight</th></tr>",
   "<tr><td>Phase 1: Discovery</td><td>",
-    "<img src='data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"16\" viewBox=\"0 0 100 16\"><rect width=\"100\" height=\"16\" rx=\"8\" fill=\"%23e9ecef\"/><rect width=\"",
-    MIN(LIST(100, INT([Phase1Pct]))),
-    "\" height=\"16\" rx=\"8\" fill=\"%23007bff\"/><text x=\"50\" y=\"12\" font-family=\"Arial\" font-size=\"10\" fill=\"%23333333\" text-anchor=\"middle\" font-weight=\"bold\">",
-    [Phase1Pct], "%</text></svg>' />",
+    "<img src=", '"', "data:image/svg+xml;utf8,",
+    ENCODEURL(CONCATENATE(
+      "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='16' viewBox='0 0 100 16'><rect width='100' height='16' rx='8' fill='#e9ecef'/><rect width=' ",
+      MIN(LIST(100, INT([Phase1Pct]))),
+      "' height='16' rx='8' fill='#007bff'/><text x='50' y='12' font-family='Arial' font-size='10' fill='#333333' text-anchor='middle' font-weight='bold'>",
+      [Phase1Pct], "%</text></svg>"
+    )),
+    '" />',
   "</td><td>30%</td></tr>",
   "<tr><td>Phase 2: Deployment</td><td>",
-    "<img src='data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"16\" viewBox=\"0 0 100 16\"><rect width=\"100\" height=\"16\" rx=\"8\" fill=\"%23e9ecef\"/><rect width=\"",
-    MIN(LIST(100, INT([Phase2Pct]))),
-    "\" height=\"16\" rx=\"8\" fill=\"%2328a745\"/><text x=\"50\" y=\"12\" font-family=\"Arial\" font-size=\"10\" fill=\"%23333333\" text-anchor=\"middle\" font-weight=\"bold\">",
-    [Phase2Pct], "%</text></svg>' />",
+    "<img src=", '"', "data:image/svg+xml;utf8,",
+    ENCODEURL(CONCATENATE(
+      "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='16' viewBox='0 0 100 16'><rect width='100' height='16' rx='8' fill='#e9ecef'/><rect width=' ",
+      MIN(LIST(100, INT([Phase2Pct]))),
+      "' height='16' rx='8' fill='#28a745'/><text x='50' y='12' font-family='Arial' font-size='10' fill='#333333' text-anchor='middle' font-weight='bold'>",
+      [Phase2Pct], "%</text></svg>"
+    )),
+    '" />',
   "</td><td>70%</td></tr>",
   "</table>"
 )
@@ -165,17 +176,36 @@ Instead of manually encoding hex `#` colors to `%23` or escaping spaces and unic
 
 ```appsheet
 CONCATENATE(
-  "<img style='width: 100%; height: auto;' src=\"data:image/svg+xml;utf8,",
+  "<img style='width: 100%; height: auto;' src=",
+  '"',
+  "data:image/svg+xml;utf8,",
   ENCODEURL(
     CONCATENATE(
       "<svg xmlns='http://www.w3.org/2000/svg' width='500' height='400' viewBox='0 0 500 400'>",
-      ...
+      "<rect width='500' height='400' fill=' ", [Color], "'/>",
       "</svg>"
     )
   ),
-  "\" />"
+  '" />'
 )
 ```
+
+### ⚠️ Critical Quoting Rules (Tested in AppSheet)
+
+AppSheet has **no backslash escape** (`\"` is not valid) and its parser mis-reads a string literal that ends in `'"`. Two rules, both mandatory:
+
+1. **Everything inside the SVG uses single quotes (`'`).** Every attribute (`fill='...'`, `viewBox='...'`, `href='#ok'`, `transform='...'`), in every branch of every `IF`/`IFS`. Never `"` and never `\"` inside SVG markup. The only double quotes in the output are the two around the `src=` value, and those come from single-quoted AppSheet literals: `'"'` to open and `'" />'` to close.
+2. **A string literal must never end with `'"` right before the comma — put a space between them: `' "`.** This happens every time an attribute value is opened and then filled by an expression:
+
+```appsheet
+❌  "<line x1='60' y1='65' stroke='", IF(...), "'/>"
+✅  "<line x1='60' y1='65' stroke=' ", IF(...), "'/>"
+```
+
+The leading space ends up inside the attribute value (`stroke=' #1a237e'`). SVG trims it, so the output still renders correctly. Closing fragments that *start* with `'` (`"'/>"`, `"'>"`) are fine as they are.
+
+> [!TIP]
+> **Tested in AppSheet (see [Template 7](#template-7-tested-animated-vertical-stepper-defs--use--css-classes--smil)):** the SVG inside the data URI keeps its own `<style>` block with CSS classes, `<defs>` + `<use href='#id'/>` for reusable shapes, and SMIL `<animate>`. The HTML sanitizer's `<style>`/`class` stripping only applies to the outer HTML, not to markup inside the encoded SVG.
 
 #### Why `ENCODEURL()` is Superior:
 1. **Natural CSS Hex Colors:** Write `#ffffff`, `#10b981`, `#ef4444` directly without tedious manual `%23` conversion.
@@ -195,40 +225,13 @@ CONCATENATE(
 
 ---
 
-### AppSheet Formula Syntax Rule: Quote Delimiters & Spacing (`' "` and `'"'`)
-
-When constructing dynamic SVGs inside AppSheet's `CONCATENATE()`, the formula tokenizer has strict parsing behaviors regarding adjacent quotes:
-
-1. **Space Between Single Quote & Closing Double Quote (`' "`):**
-   - ❌ **Wrong:** `"<text fill='", IF([Status] = "Active", "#10b981", "#ef4444"), "'>"` $\to$ can trigger formula parser tokenization errors.
-   - ✅ **Right:** `"<text fill=' ", IF([Status] = "Active", "#10b981", "#ef4444"), "'>"` $\to$ inserting a space between `'` and `"` ensures the string token closes cleanly.
-2. **Distinct Double-Quote Token Passing (`'"'`):**
-   - When wrapping HTML `<img>` attributes, pass double quotes as explicit separate tokens rather than raw escape sequences (`\"`):
-     ```appsheet
-     CONCATENATE(
-       "<img style='width: 100%; height: auto;' src=",
-       '"',
-       "data:image/svg+xml;utf8,",
-       ENCODEURL(
-         CONCATENATE(
-           "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 500 400'>",
-           ...
-           "</svg>"
-         )
-       ),
-       '" />'
-     )
-     ```
-
----
-
 ### What You CAN'T Do in AppSheet SVGs (Traps & Failure Modes)
 
 | ❌ Failure Mode / Trap | Why It Fails in AppSheet | ✅ What To Do Instead |
 | :--- | :--- | :--- |
-| **Adjacent Quote Collisions** (`"fill='"` without space) | AppSheet's tokenizer can misinterpret `'"'` as an invalid string delimiter or escape attempt when splitting formula parameters. | Add a space before closing the string literal (`"fill=' "`) or pass `'"'` as an explicit token. |
 | **Unencoded `#` in Hex Colors** (`fill='#28a745'`) | When not using `ENCODEURL()`, `#` is treated as a URL fragment identifier in mobile WebViews, cutting off the rest of the SVG string and rendering a blank image. | Wrap the entire SVG XML in **`ENCODEURL()`**, or manually encode `#` as `%23` (`fill='%2328a745'`). |
-| **Double Quote Syntax Collisions** | Using unescaped double quotes inside formula strings breaks AppSheet's expression parser. | Use single quotes (`'`) for SVG attributes or pass `'"'` as a distinct argument in `CONCATENATE()`. |
+| **Double Quote Syntax Collisions** | Double quotes inside formula strings, whether escaped with `\"` or doubled as `""`, break AppSheet's expression parser. | Use single quotes (`'`) for **all** SVG attributes. Emit the `src=` double quotes with the `'"'` / `'" />'` literals. |
+| **`'"` Right Before a Comma** (`stroke='",`) | The parser mis-reads the literal ending, and the formula fails or produces broken markup. | Insert a space: `stroke=' ",`. SVG trims the leading space in the value. |
 | **Missing `xmlns` Namespace** | Without `xmlns='http://www.w3.org/2000/svg'`, mobile WebViews and some browsers fail to identify the XML as vector graphics and render a broken icon. | Always include `xmlns='http://www.w3.org/2000/svg'` in the root `<svg>` element. |
 | **`<script>` Tags or Event Handlers** | AppSheet and mobile WebViews strip or block JavaScript execution for security. | Use pure declarative SVG vector properties and AppSheet formula conditions (`IFS()`, `IF()`). |
 | **External Fonts** (`@import url(...)`) | WebViews block cross-origin font downloads inside SVG Data URIs, causing text fallback or rendering failure. | Use standard system fonts: `font-family='system-ui, -apple-system, sans-serif'`. |
@@ -291,9 +294,9 @@ CONCATENATE(
   ENCODEURL(
     CONCATENATE(
       "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 120'>",
-      "<rect width='320' height='120' rx='12' fill='", 
+      "<rect width='320' height='120' rx='12' fill=' ", 
       IFS([ChangePercentage] >= 0, "#e8f5e9", TRUE, "#ffebee"), 
-      "' stroke='",
+      "' stroke=' ",
       IFS([ChangePercentage] >= 0, "#81c784", TRUE, "#e57373"),
       "' stroke-width='2' />",
       "<text x='20' y='32' font-family='Arial, sans-serif' font-size='14' font-weight='600' fill='#555555'>",
@@ -302,7 +305,7 @@ CONCATENATE(
       "<text x='20' y='75' font-family='Arial, sans-serif' font-size='32' font-weight='bold' fill='#212121'>",
       TEXT([CurrentValue], "$#,##0"),
       "</text>",
-      "<text x='20' y='102' font-family='Arial, sans-serif' font-size='13' font-weight='bold' fill='",
+      "<text x='20' y='102' font-family='Arial, sans-serif' font-size='13' font-weight='bold' fill=' ",
       IFS([ChangePercentage] >= 0, "#2e7d32", TRUE, "#c62828"),
       "'>",
       IFS([ChangePercentage] >= 0, "▲ +", TRUE, "▼ "), TEXT([ChangePercentage] * 100, "0.0%"), " vs last month",
@@ -324,11 +327,11 @@ CONCATENATE(
   "<!-- Background track (perimeter = 2 * PI * 45 ≈ 283) -->",
   "<circle cx='60' cy='60' r='45' fill='none' stroke='%23e0e0e0' stroke-width='10' />",
   "<!-- Dynamic progress circle -->",
-  "<circle cx='60' cy='60' r='45' fill='none' stroke='",
+  "<circle cx='60' cy='60' r='45' fill='none' stroke=' ",
   IFS([Progress] >= 1.0, "%232e7d32", [Progress] >= 0.5, "%231976d2", TRUE, "%23f57c00"),
   "' stroke-width='10' stroke-linecap='round' ",
   "stroke-dasharray='283' ",
-  "stroke-dashoffset='", TEXT(283 * (1 - MIN(LIST([Progress], 1.0))), "0"), "' ",
+  "stroke-dashoffset=' ", TEXT(283 * (1 - MIN(LIST([Progress], 1.0))), "0"), "' ",
   "transform='rotate(-90 60 60)' />",
   "<text x='60' y='66' font-family='Arial, sans-serif' font-size='20' font-weight='bold' text-anchor='middle' fill='%23212121'>",
   TEXT([Progress] * 100, "0%"),
@@ -345,13 +348,13 @@ Generates a modern rounded pill badge with status indicator dot.
 ```appsheet
 CONCATENATE(
   "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 36'>",
-  "<rect width='160' height='36' rx='18' fill='",
+  "<rect width='160' height='36' rx='18' fill=' ",
   IFS([Status] = "Completed", "%23e8f5e9", [Status] = "In Progress", "%23e3f2fd", [Status] = "Delayed", "%23ffebee", TRUE, "%23f5f5f5"),
   "' />",
-  "<circle cx='20' cy='18' r='5' fill='",
+  "<circle cx='20' cy='18' r='5' fill=' ",
   IFS([Status] = "Completed", "%232e7d32", [Status] = "In Progress", "%231976d2", [Status] = "Delayed", "%23c62828", TRUE, "%23757575"),
   "' />",
-  "<text x='34' y='23' font-family='Arial, sans-serif' font-size='13' font-weight='bold' fill='",
+  "<text x='34' y='23' font-family='Arial, sans-serif' font-size='13' font-weight='bold' fill=' ",
   IFS([Status] = "Completed", "%231b5e20", [Status] = "In Progress", "%230d47a1", [Status] = "Delayed", "%23b71c1c", TRUE, "%23424242"),
   "'>",
   UPPER([Status]),
@@ -369,15 +372,15 @@ Generates a 5-star rating bar where stars are filled dynamically based on a nume
 CONCATENATE(
   "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 150 30'>",
   "<!-- Star 1 -->",
-  "<polygon points='15,2 19,10 28,11 21,17 23,26 15,21 7,26 9,17 2,11 11,10' fill='", IFS([Rating] >= 1, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
+  "<polygon points='15,2 19,10 28,11 21,17 23,26 15,21 7,26 9,17 2,11 11,10' fill=' ", IFS([Rating] >= 1, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
   "<!-- Star 2 -->",
-  "<polygon points='45,2 49,10 58,11 51,17 53,26 45,21 37,26 39,17 32,11 41,10' fill='", IFS([Rating] >= 2, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
+  "<polygon points='45,2 49,10 58,11 51,17 53,26 45,21 37,26 39,17 32,11 41,10' fill=' ", IFS([Rating] >= 2, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
   "<!-- Star 3 -->",
-  "<polygon points='75,2 79,10 88,11 81,17 83,26 75,21 67,26 69,17 62,11 71,10' fill='", IFS([Rating] >= 3, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
+  "<polygon points='75,2 79,10 88,11 81,17 83,26 75,21 67,26 69,17 62,11 71,10' fill=' ", IFS([Rating] >= 3, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
   "<!-- Star 4 -->",
-  "<polygon points='105,2 109,10 118,11 111,17 113,26 105,21 97,26 99,17 92,11 101,10' fill='", IFS([Rating] >= 4, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
+  "<polygon points='105,2 109,10 118,11 111,17 113,26 105,21 97,26 99,17 92,11 101,10' fill=' ", IFS([Rating] >= 4, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
   "<!-- Star 5 -->",
-  "<polygon points='135,2 139,10 148,11 141,17 143,26 135,21 127,26 129,17 122,11 131,10' fill='", IFS([Rating] >= 5, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
+  "<polygon points='135,2 139,10 148,11 141,17 143,26 135,21 127,26 129,17 122,11 131,10' fill=' ", IFS([Rating] >= 5, "%23ffc107", TRUE, "%23e0e0e0"), "' />",
   "</svg>"
 )
 ```
@@ -394,20 +397,20 @@ CONCATENATE(
     CONCATENATE(
       "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 50'>",
       "<!-- Connecting lines -->",
-      "<line x1='40' y1='25' x2='140' y2='25' stroke='", IFS([StepNumber] >= 2, "#1976d2", TRUE, "#e0e0e0"), "' stroke-width='4' />",
-      "<line x1='140' y1='25' x2='240' y2='25' stroke='", IFS([StepNumber] >= 3, "#1976d2", TRUE, "#e0e0e0"), "' stroke-width='4' />",
-      "<line x1='240' y1='25' x2='340' y2='25' stroke='", IFS([StepNumber] >= 4, "#1976d2", TRUE, "#e0e0e0"), "' stroke-width='4' />",
+      "<line x1='40' y1='25' x2='140' y2='25' stroke=' ", IFS([StepNumber] >= 2, "#1976d2", TRUE, "#e0e0e0"), "' stroke-width='4' />",
+      "<line x1='140' y1='25' x2='240' y2='25' stroke=' ", IFS([StepNumber] >= 3, "#1976d2", TRUE, "#e0e0e0"), "' stroke-width='4' />",
+      "<line x1='240' y1='25' x2='340' y2='25' stroke=' ", IFS([StepNumber] >= 4, "#1976d2", TRUE, "#e0e0e0"), "' stroke-width='4' />",
       "<!-- Step 1 Circle -->",
-      "<circle cx='40' cy='25' r='14' fill='", IFS([StepNumber] >= 1, "#1976d2", TRUE, "#e0e0e0"), "' />",
+      "<circle cx='40' cy='25' r='14' fill=' ", IFS([StepNumber] >= 1, "#1976d2", TRUE, "#e0e0e0"), "' />",
       "<text x='40' y='30' font-family='Arial, sans-serif' font-size='12' font-weight='bold' text-anchor='middle' fill='white'>1</text>",
       "<!-- Step 2 Circle -->",
-      "<circle cx='140' cy='25' r='14' fill='", IFS([StepNumber] >= 2, "#1976d2", TRUE, "#e0e0e0"), "' />",
+      "<circle cx='140' cy='25' r='14' fill=' ", IFS([StepNumber] >= 2, "#1976d2", TRUE, "#e0e0e0"), "' />",
       "<text x='140' y='30' font-family='Arial, sans-serif' font-size='12' font-weight='bold' text-anchor='middle' fill='white'>2</text>",
       "<!-- Step 3 Circle -->",
-      "<circle cx='240' cy='25' r='14' fill='", IFS([StepNumber] >= 3, "#1976d2", TRUE, "#e0e0e0"), "' />",
+      "<circle cx='240' cy='25' r='14' fill=' ", IFS([StepNumber] >= 3, "#1976d2", TRUE, "#e0e0e0"), "' />",
       "<text x='240' y='30' font-family='Arial, sans-serif' font-size='12' font-weight='bold' text-anchor='middle' fill='white'>3</text>",
       "<!-- Step 4 Circle -->",
-      "<circle cx='340' cy='25' r='14' fill='", IFS([StepNumber] >= 4, "#1976d2", TRUE, "#e0e0e0"), "' />",
+      "<circle cx='340' cy='25' r='14' fill=' ", IFS([StepNumber] >= 4, "#1976d2", TRUE, "#e0e0e0"), "' />",
       "<text x='340' y='30' font-family='Arial, sans-serif' font-size='12' font-weight='bold' text-anchor='middle' fill='white'>4</text>",
       "</svg>"
     )
@@ -437,7 +440,7 @@ CONCATENATE(
 
       "<!-- STAGE 1: SUBMISSION -->",
       "<g transform='translate(0, 0)'>",
-        "<line x1='60' y1='65' x2='60' y2='125' stroke-width='3' stroke-linecap='round' stroke='",
+        "<line x1='60' y1='65' x2='60' y2='125' stroke-width='3' stroke-linecap='round' stroke=' ",
         IFS(ISBLANK([Status]), "#e2e8f0", [Status] = "Rejected", "#ef4444", TRUE, "#1a237e"),
         "' />",
         IFS(
@@ -448,7 +451,7 @@ CONCATENATE(
           "<circle cx='60' cy='50' r='18' fill='#10b981' stroke='#10b981' stroke-width='2.5'/>
            <path d='M 54 50 L 58 54 L 66 45' stroke='#ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/>"
         ),
-        "<text x='100' y='46' font-family='system-ui, sans-serif' font-size='18' font-weight='700' fill='",
+        "<text x='100' y='46' font-family='system-ui, sans-serif' font-size='18' font-weight='700' fill=' ",
         IF(ISBLANK([Status]), "#94a3b8", "#1e293b"),
         "'>Request Submitted</text>",
         "<text x='100' y='66' font-family='system-ui, sans-serif' font-size='13' fill='#64748b'>Initial submission recorded in system</text>",
@@ -456,11 +459,11 @@ CONCATENATE(
 
       "<!-- STAGE 2: REVIEW & APPROVAL -->",
       "<g transform='translate(0, 110)'>",
-        "<line x1='60' y1='65' x2='60' y2='125' stroke-width='3' stroke-linecap='round' stroke='",
+        "<line x1='60' y1='65' x2='60' y2='125' stroke-width='3' stroke-linecap='round' stroke=' ",
         IFS(IN([Status], LIST("Approved", "In Progress", "Completed")), "#1a237e", TRUE, "#e2e8f0"),
         "' />",
         IFS(
-          ISBLANK([Status]) OR [Status] = "Submitted",
+          OR(ISBLANK([Status]), [Status] = "Submitted"),
           "<circle cx='60' cy='50' r='18' fill='#eff6ff' stroke='#1a237e' stroke-width='2.5'/>
            <text x='60' y='50' font-family='system-ui, sans-serif' font-size='13' fill='#1a237e' font-weight='800' text-anchor='middle' dominant-baseline='central'>02</text>
            <text x='100' y='46' font-family='system-ui, sans-serif' font-size='18' font-weight='700' fill='#1e293b'>Manager Review</text>
@@ -480,7 +483,7 @@ CONCATENATE(
 
       "<!-- STAGE 3: EXECUTION -->",
       "<g transform='translate(0, 220)'>",
-        "<line x1='60' y1='65' x2='60' y2='125' stroke-width='3' stroke-linecap='round' stroke='",
+        "<line x1='60' y1='65' x2='60' y2='125' stroke-width='3' stroke-linecap='round' stroke=' ",
         IFS([Status] = "Completed", "#1a237e", TRUE, "#e2e8f0"),
         "' />",
         IFS(
@@ -521,6 +524,151 @@ CONCATENATE(
       "</svg>"
     )
   ),
+  '" />'
+)
+```
+
+---
+
+### Template 7: Tested Animated Vertical Stepper (`<defs>` + `<use>`, CSS Classes, SMIL)
+
+A 6-stage training workflow stepper that has been **tested and renders in AppSheet** (`LongText`, format `HTML`). Use it as the reference implementation for the [Critical Quoting Rules](#-critical-quoting-rules-tested-in-appsheet).
+
+What it demonstrates:
+- **Quoting:** every SVG attribute uses `'`. Attribute values filled by an expression open with `' "` (e.g. `stroke=' ",`). The `src=` double quotes come from `'"'` and `'" />'`.
+- **Internal `<style>` + classes** (`.t`, `.s`, `.n`, `.g`, `.d` …) shrink every `<text>` node down to `class='t d'`. That cuts formula length a lot compared with repeating `font-family`/`font-size`/`fill` on each node.
+- **`<defs>` + `<use href='#id'/>`** reuse the pending (`#p`), active (`#a`) and done (`#ok`) circles, so each state is written once.
+- **SMIL `<animate>`** draws the ring and then the checkmark (`stroke-dashoffset` from 60 to 0, then 14 to 0, `fill='freeze'`) in every completed step.
+- **Branch-local tails:** some `IFS` branches emit only the opening `<text ...>`, and the shared label (e.g. `IF([loại_hình_đào_tạo] = "Chứng Chỉ", ...)`) plus `</text>` follow after the `IFS`. This removes duplicated labels.
+- **Skipped state:** a dashed connector (`stroke-dasharray='4,4'`) and a dashed `N/A` circle when `[ký_thỏa_thuận]` is not `TRUE`.
+
+```appsheet
+CONCATENATE(
+  "<img style='width: 100%; height: auto;' src=",
+  '"',
+  "data:image/svg+xml;utf8,",
+  ENCODEURL(CONCATENATE(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='500' height='660' viewBox='0 0 500 660'>",
+    "<style>text{font-family:system-ui,sans-serif}.t{font-size:18px;font-weight:700}.s{font-size:13px}.n{font-size:13px;font-weight:800;text-anchor:middle;dominant-baseline:central}.g{fill:#94a3b8}.d{fill:#1e293b}.m{fill:#64748b}.l{fill:#cbd5e1}.b{fill:#1a237e}.r{fill:#ef4444}line{stroke-width:3;stroke-linecap:round}</style>",
+    "<defs>",
+    "<circle id='p' cx='60' cy='50' r='18' fill='#f8fafc' stroke='#cbd5e1' stroke-width='2.5'/>",
+    "<circle id='a' cx='60' cy='50' r='18' fill='#eff6ff' stroke='#1a237e' stroke-width='2.5'/>",
+    "<g id='ok'><circle cx='60' cy='50' r='18' fill='#10b981'/><g transform='translate(42,32) scale(1.5)' fill='none' stroke='#fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'>",
+    "<path stroke-dasharray='60' d='M3 12c0 -4.97 4.03 -9 9 -9c4.97 0 9 4.03 9 9c0 4.97 -4.03 9 -9 9c-4.97 0 -9 -4.03 -9 -9Z'><animate fill='freeze' attributeName='stroke-dashoffset' dur='0.6s' values='60;0'/></path>",
+    "<path stroke-dasharray='14' stroke-dashoffset='14' d='M8 12l3 3l5 -5'><animate fill='freeze' attributeName='stroke-dashoffset' begin='0.6s' dur='0.2s' to='0'/></path>",
+    "</g></g></defs>",
+    "<rect width='500' height='660' rx='28' fill='#fff' stroke='#edf2f7' stroke-width='2'/>",
+
+    "<g><line x1='60' y1='65' x2='60' y2='125' stroke=' ",
+    IFS(
+      ISBLANK([trạng_thái_thực_hiện]), "#e2e8f0",
+      [trạng_thái_thực_hiện] = "Không Tham Gia", "#ef4444",
+      [trạng_thái_thực_hiện] = "Đã Gửi Thông Báo", "#e2e8f0",
+      TRUE, "#1a237e"
+    ),
+    "'/>",
+    IF(ISBLANK([trạng_thái_thực_hiện]),
+      "<use href='#p'/><text class='n g' x='60' y='50'>01</text><text class='t g' x='100' y='46'>",
+      "<use href='#ok'/><text class='t d' x='100' y='46'>"
+    ),
+    "Đã Gửi Thông Báo</text><text class='s m' x='100' y='66'>Hệ thống đã gửi thông báo đến nhân sự</text></g>",
+
+    "<g transform='translate(0,110)'><line x1='60' y1='65' x2='60' y2='125' stroke=' ",
+    IF(OR(ISBLANK([trạng_thái_thực_hiện]), IN([trạng_thái_thực_hiện], LIST("Đã Gửi Thông Báo", "Không Tham Gia", "Xác Nhận Tham Gia"))), "#e2e8f0", "#1a237e"),
+    "'/>",
+    IFS(
+      ISBLANK([trạng_thái_thực_hiện]),
+        "<use href='#p'/><text class='n g' x='60' y='50'>02</text><text class='t g' x='100' y='46'>Xác Nhận Tham Gia</text><text class='s l' x='100' y='66'>Nhân sự xác nhận phản hồi tham gia",
+      [trạng_thái_thực_hiện] = "Không Tham Gia",
+        "<circle cx='60' cy='50' r='18' fill='#fef2f2' stroke='#ef4444' stroke-width='2.5'/><text class='n r' x='60' y='50'>X</text><text class='t r' x='100' y='46'>Không Tham Gia</text><text class='s m' x='100' y='66'>Nhân sự từ chối phản hồi tham gia",
+      [trạng_thái_thực_hiện] = "Đã Gửi Thông Báo",
+        "<use href='#a'/><text class='n b' x='60' y='50'>02</text><text class='t d' x='100' y='46'>Xác Nhận Tham Gia</text><text class='s m' x='100' y='66'>Nhân sự xác nhận phản hồi tham gia",
+      TRUE,
+        "<use href='#ok'/><text class='t d' x='100' y='46'>Xác Nhận Tham Gia</text><text class='s m' x='100' y='66'>Nhân sự xác nhận phản hồi tham gia"
+    ),
+    "</text></g>",
+
+    "<g transform='translate(0,220)'><line x1='60' y1='65' x2='60' y2='125' ",
+    IF(NOT([ký_thỏa_thuận] = TRUE), " stroke-dasharray='4,4' ", ""),
+    " stroke=' ",
+    IF(OR(ISBLANK([trạng_thái_thực_hiện]), IN([trạng_thái_thực_hiện], LIST("Đã Gửi Thông Báo", "Không Tham Gia", "Xác Nhận Tham Gia"))), "#e2e8f0", "#1a237e"),
+    "'/>",
+    IFS(
+      NOT([ký_thỏa_thuận] = TRUE),
+        "<circle cx='60' cy='50' r='18' fill='#f1f5f9' stroke='#cbd5e1' stroke-width='2' stroke-dasharray='3,3'/><text class='n g' x='60' y='50' style='font-size:11px;font-weight:700'>N/A</text><text class='t g' x='100' y='46'>",
+      OR(ISBLANK([trạng_thái_thực_hiện]), IN([trạng_thái_thực_hiện], LIST("Đã Gửi Thông Báo", "Không Tham Gia"))),
+        "<use href='#p'/><text class='n g' x='60' y='50'>03</text><text class='t g' x='100' y='46'>",
+      [trạng_thái_thực_hiện] = "Xác Nhận Tham Gia",
+        "<use href='#a'/><text class='n b' x='60' y='50'>03</text><text class='t d' x='100' y='46'>",
+      TRUE,
+        "<use href='#ok'/><text class='t d' x='100' y='46'>"
+    ),
+    IF([loại_hình_đào_tạo] = "Chứng Chỉ", "Ký Thỏa Thuận Trước Thi", "Ký Thỏa Thuận Trước Khóa Học"),
+    "</text><text class='s ",
+    IFS(
+      NOT([ký_thỏa_thuận] = TRUE), "m' x='100' y='66'>Bỏ qua — Không yêu cầu cam kết",
+      ISBLANK([trạng_thái_thực_hiện]), "l' x='100' y='66'>Nhân sự ký cam kết đào tạo",
+      TRUE, "m' x='100' y='66'>Nhân sự ký cam kết đào tạo"
+    ),
+    "</text></g>",
+
+    "<g transform='translate(0,330)'><line x1='60' y1='65' x2='60' y2='125' stroke=' ",
+    IF(IN([trạng_thái_thực_hiện], LIST("Tham Gia Thi", "Tham Gia Khóa Học", "Hoàn Thành Thi Chứng Chỉ", "Hoàn Thành Khóa Học", "Hoàn Thành")), "#1a237e", "#e2e8f0"),
+    "'/>",
+    IFS(
+      OR(ISBLANK([trạng_thái_thực_hiện]), IN([trạng_thái_thực_hiện], LIST("Đã Gửi Thông Báo", "Không Tham Gia")), AND([trạng_thái_thực_hiện] = "Xác Nhận Tham Gia", [ký_thỏa_thuận] = TRUE)),
+        "<use href='#p'/><text class='n g' x='60' y='50'>04</text><text class='t g' x='100' y='46'>",
+      IN([trạng_thái_thực_hiện], LIST("Xác Nhận Tham Gia", "Ký Thỏa Thuận Trước Thi", "Ký Thỏa Thuận Trước Khóa Học")),
+        "<use href='#a'/><text class='n b' x='60' y='50'>04</text><text class='t d' x='100' y='46'>",
+      TRUE,
+        "<use href='#ok'/><text class='t d' x='100' y='46'>"
+    ),
+    IF([loại_hình_đào_tạo] = "Chứng Chỉ", "Tham Gia Thi", "Tham Gia Khóa Học"),
+    "</text><text class='s m' x='100' y='66'>",
+    IFS(
+      ISBLANK([trạng_thái_thực_hiện]), "Chờ hoàn thành bước trước",
+      IN([trạng_thái_thực_hiện], LIST("Tham Gia Thi", "Tham Gia Khóa Học", "Hoàn Thành Thi Chứng Chỉ", "Hoàn Thành Khóa Học", "Hoàn Thành")), "Kế hoạch đã duyệt — Đang diễn ra quá trình học/thi",
+      [trạng_thái_thanh_toán] = TRUE, "Kế hoạch đã duyệt — Nhân sự sẵn sàng tham gia",
+      TRUE, "Chờ HR phê duyệt kế hoạch đào tạo"
+    ),
+    "</text></g>",
+
+    "<g transform='translate(0,440)'><line x1='60' y1='65' x2='60' y2='125' stroke=' ",
+    IF(IN([trạng_thái_thực_hiện], LIST("Hoàn Thành Thi Chứng Chỉ", "Hoàn Thành Khóa Học", "Hoàn Thành")), "#1a237e", "#e2e8f0"),
+    "'/>",
+    IFS(
+      OR(ISBLANK([trạng_thái_thực_hiện]), IN([trạng_thái_thực_hiện], LIST("Đã Gửi Thông Báo", "Không Tham Gia", "Xác Nhận Tham Gia", "Ký Thỏa Thuận Trước Thi", "Ký Thỏa Thuận Trước Khóa Học"))),
+        "<use href='#p'/><text class='n g' x='60' y='50'>05</text><text class='t g' x='100' y='46'>",
+      IN([trạng_thái_thực_hiện], LIST("Tham Gia Thi", "Tham Gia Khóa Học")),
+        "<use href='#a'/><text class='n b' x='60' y='50'>05</text><text class='t d' x='100' y='46'>",
+      TRUE,
+        "<use href='#ok'/><text class='t d' x='100' y='46'>"
+    ),
+    IF([loại_hình_đào_tạo] = "Chứng Chỉ", "Hoàn Thành Thi Chứng Chỉ", "Hoàn Thành Khóa Học"),
+    "</text><text class='s ",
+    IFS(
+      OR(ISBLANK([trạng_thái_thực_hiện]), IN([trạng_thái_thực_hiện], LIST("Đã Gửi Thông Báo", "Không Tham Gia", "Xác Nhận Tham Gia", "Ký Thỏa Thuận Trước Thi", "Ký Thỏa Thuận Trước Khóa Học"))),
+        "l' x='100' y='66'>Chờ hoàn thành bước trước",
+      IN([trạng_thái_thực_hiện], LIST("Tham Gia Thi", "Tham Gia Khóa Học")),
+        "m' x='100' y='66'>Hoàn thành quá trình học/thi để sang bước kế tiếp",
+      TRUE,
+        "m' x='100' y='66'>Hoàn tất chương trình học, kết quả đã nộp"
+    ),
+    "</text></g>",
+
+    "<g transform='translate(0,550)'>",
+    IFS(
+      [trạng_thái_thực_hiện] = "Hoàn Thành",
+        "<use href='#ok'/><text class='t d' x='100' y='46'>Hoàn Thành</text><text class='s m' x='100' y='66'>Đã đánh giá/upload kết quả thành công",
+      IN([trạng_thái_thực_hiện], LIST("Hoàn Thành Thi Chứng Chỉ", "Hoàn Thành Khóa Học")),
+        "<use href='#a'/><text class='n b' x='60' y='50'>06</text><text class='t d' x='100' y='46'>Hoàn Thành</text><text class='s m' x='100' y='66'>"
+        & IF([trạng_thái_thực_hiện] = "Hoàn Thành Thi Chứng Chỉ", "Chứng chỉ/Điểm số đang chờ phê duyệt", "Nhân sự làm đánh giá để khép lại quy trình"),
+      TRUE,
+        "<use href='#p'/><text class='n g' x='60' y='50'>06</text><text class='t g' x='100' y='46'>Hoàn Thành</text><text class='s g' x='100' y='66'>Chưa hoàn thành quy trình"
+    ),
+    "</text></g>",
+    "</svg>"
+  )),
   '" />'
 )
 ```

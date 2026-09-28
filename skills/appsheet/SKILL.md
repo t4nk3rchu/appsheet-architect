@@ -42,7 +42,7 @@ When NOT to use:
 | **View / Context** | `CONTEXT("View")` / `CONTEXT("ViewType")` | `CONTEXT("ViewType") = "Form"` |
 | **State Transition** | `[_THISROW_BEFORE].[Col] <> [_THISROW_AFTER].[Col]` | `[_THISROW_BEFORE].[Status] <> "Done"` |
 | **Primary Key ID** | `UNIQUEID()` (Initial Value) | `UNIQUEID()` |
-| **Dynamic SVG** | `CONCATENATE("data:image/svg+xml;utf8,<svg ...", ... , "</svg>")` | (See UI/UX Guide for templates) |
+| **Dynamic SVG** | `CONCATENATE("data:image/svg+xml;utf8,<svg ...", ... , "</svg>")` | ⚠️ Use single quotes everywhere inside the SVG, and write `' "` (with a space), never `'"`, before a comma: `"fill=' ", [Color], "'/>"`. See the UI/UX Guide. |
 | **Sync Projection** | $T_{\text{sync}} \approx N/3 + (R_{\max} \times C_{\max})/5000$ seconds | Quick baseline estimate |
 
 ## Architecture & Decision Guides
