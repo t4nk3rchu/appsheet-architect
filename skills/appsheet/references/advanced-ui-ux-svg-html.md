@@ -278,7 +278,8 @@ CONCATENATE(
 *Why it succeeds:*
 1. `ENCODEURL()` handles all `#` hex colors, spaces, and unicode characters automatically.
 2. Proper `xmlns` namespace and `viewBox` ensure flawless vector scaling across all mobile and desktop devices.
-3. `<img style='width: 100%; height: auto;' />` ensures seamless responsive layout in `LongText` HTML views.
+3. Separate `'"'` tokens and space padding ensure clean formula compilation in AppSheet.
+4. `<img style='width: 100%; height: auto;' />` ensures seamless responsive layout in `LongText` HTML views.
 
 ---
 
