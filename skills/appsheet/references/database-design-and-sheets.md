@@ -21,7 +21,7 @@ In AppSheet, the **Key Column** is the immutable identity of a record across all
 |     +---> YES ---> NATURAL KEY: 'PartNumber' / 'Code' is ACCEPTABLE (Set as Text in Sheets).       |
 |                                                                                                   |
 |  3. General Transactions, Work Orders, Invoices, Tasks, or Child Tables?                          |
-|     +---> YES ---> SYNTHETIC KEY: 'UNIQUEID()' is MANDATORY (Collision-free, offline-ready).      |
+|     +---> YES ---> SYNTHETIC KEY: 'UNIQUEID()' is RECOMMENDED (random, offline-ready).      |
 |                                                                                                   |
 |  4. Sensitive PII (SSN, Tax ID, National ID)?                                                     |
 |     +---> YES ---> NEVER USE AS KEY (Use UNIQUEID() key; protect PII in restricted column).       |
@@ -34,7 +34,7 @@ In AppSheet, the **Key Column** is the immutable identity of a record across all
 | :--- | :--- | :--- | :--- |
 | **Natural Key: `Email`** | Dedicated `Users` / `Staff` tables in Google Workspace environments. | Direct 1:1 integration with `USEREMAIL()`. Eliminates intermediate lookup hops in Security Filters (`[AssignedTo] = USEREMAIL()`). In Google Workspace, user identities and app seats are tied directly to corporate email addresses. | **SUPERIOR & RECOMMENDED FOR `Users` TABLES**. |
 | **Natural Key: `PartNumber` / `SKU` / `ISO Code`** | Fixed product catalog, currency (`USD`, `EUR`), country codes (`US`, `VN`). | Human-readable references. Ensures direct lookup in raw spreadsheet backends. **Format Rule:** Must set column to **Text** in Google Sheets (enforcing a leading apostrophe `'` or explicit text format) so leading zeroes (`01234`) are preserved and not coerced to numbers. | **ACCEPTABLE FOR STATIC CATALOGS**. |
-| **`UNIQUEID()`** (AppSheet Initial Value) | All transaction, child, and business entity tables (`Orders`, `Tasks`, `Assets`, `Invoices`). | Generates an 8-character collision-free alphanumeric hash client-side before sync. Works completely offline. Immune to human typos or renumbering. | **MANDATORY BEST PRACTICE** for general tables. |
+| **`UNIQUEID()`** (AppSheet Initial Value) | All transaction, child, and business entity tables (`Orders`, `Tasks`, `Assets`, `Invoices`). | Generates an 8-character random alphanumeric ID ("effectively unique" but not guaranteed unique, per the official UNIQUEID docs). Works offline. For stricter uniqueness use `UNIQUEID("UUID")`. Immune to human typos or renumbering. | **RECOMMENDED BEST PRACTICE** for general tables. |
 | **Natural Key: `SSN` / `TaxID` / `Phone`** | Confidential personal records. | **PII Exposure Risk:** Foreign keys are copied across dozens of child tables, leaking sensitive PII into synced client devices. | **NEVER USE AS PRIMARY KEY**. Use synthetic `UNIQUEID()` as the Key and store SSN as a separate restricted column with `Valid_If` uniqueness. |
 | **`_ROWNUMBER`** | System internal row index. | Key dynamically changes whenever rows are sorted, inserted, filtered, or deleted in the backend sheet, causing severe data corruption and orphaned child records. | **CRITICAL ANTI-PATTERN**. Never use as primary key. |
 | **Spreadsheet Sequential ID** (`=MAX(A:A)+1`) | Spreadsheet-only workflows. | Fails when multiple users add records offline or concurrently (generates duplicate IDs, overwriting rows). | **FATAL CONCURRENCY TRAP**. |
@@ -48,7 +48,7 @@ In relational schemas (e.g. `Orders` $\to$ `OrderDetails`):
 2. **`IsPartOf = TRUE`:** Set on the child's `Ref` column. This unlocks:
    - **Nested Form Entry:** Allows adding, editing, and previewing child rows directly inside the parent form view before the parent is saved.
    - **Cascading Deletes:** Deleting the parent automatically deletes all linked child rows from the database.
-   - **Atomic Batch Sync:** Parent and child rows are bundled into a single sync transaction.
+   - Note: cascade deletes do not trigger automation rules.
 3. **`REF_ROWS("ChildTable", "ParentRefColumn")`:** AppSheet automatically generates a Virtual Column on the parent returning a list of child keys for parent-level rollups (`SUM([Related OrderDetails][TotalPrice])`).
 
 ---
@@ -105,9 +105,9 @@ AppSheet applications should follow a **3-Tier Pragmatic Denormalization Archite
 
 ## 3. Table Width vs Row Count: Recommended Column Limits
 
-AppSheet downloads **all columns of every synced row** to the client device (even if columns are hidden in views or `Show_If = FALSE`).
+AppSheet appears to download **all columns of every synced row** to the client device (plausible, not explicitly stated in the docs; even if columns are hidden in views or `Show_If = FALSE`).
 
-#### Practical Column Limits:
+#### Practical Column Limits (rough rules of thumb, unverified; official docs give only the 1,000-column spreadsheet guideline and a 100-column cap per AppSheet DB table):
 * **$< 30$ Columns (Optimal):** Fast sync, minimal memory usage, instant form rendering. Ideal for high-frequency operational tables.
 * **$30–50$ Columns (Standard):** Typical for primary business entities (`WorkOrders`, `Projects`). Keep Virtual Columns $\le 5$.
 * **$50–100$ Columns (Warning Zone):** Measurable sync slowdown on mobile devices. Separate large text blobs or audit notes.
@@ -117,8 +117,8 @@ AppSheet downloads **all columns of every synced row** to the client device (eve
 1. **1:1 Extension Table Pattern (Split Wide Tables):**
    - Instead of a single 120-column `Employees` table, split into:
      - `Employees_Core` (15 columns: `EmployeeID`, `Name`, `Email`, `Department`, `Title`, `Status`, `Photo`) $\to$ Used in all general List, Table, and Deck views.
-     - `Employees_HR_Private` (50 columns: `SSN`, `BankDetails`, `Salary`, `EmergencyContacts`, `TaxInfo`) with `Ref` key `EmployeeID` and `IsPartOf = TRUE` $\to$ Loaded only in dedicated HR detail/form views.
-   - *Result:* 80% reduction in sync payload for general users.
+     - `Employees_HR_Private` (50 columns: `SSN`, `BankDetails`, `Salary`, `EmergencyContacts`, `TaxInfo`) with `Ref` key `EmployeeID` and `IsPartOf = TRUE` $\to$ Restrict it with a **Security Filter** (e.g. `USERROLE() = "HR"`): views do NOT stop data from syncing to the device, only security filters do.
+   - *Result:* a smaller sync payload for general users (no measured figure).
 2. **Vertical Column Reduction via `EnumList`:**
    - ❌ *Anti-Pattern:* 20 separate `Yes/No` columns for permissions (`CanEditOrders`, `CanDeleteOrders`, `CanApproveRefunds`, ...).
    - ✅ *Optimized Pattern:* 1 `EnumList` column (`Permissions`) storing a comma-separated list of granted permission tags.
@@ -142,8 +142,8 @@ graph TD
     A["User Submits Form in AppSheet"] --> B{"Where is the failure happening?"}
     B -->|"Device Level"| C["Cause 1: Client Sync Queue Drop (App Closure)"]
     B -->|"Google Sheets API Level"| D["Cause 2: Sheet appendCells Index Lag"]
-    B -->|"Google Drive Quota Level"| E["Cause 3: HTTP 429 Rate Limit Silent Drop"]
-    B -->|"Sheet Grid Formatting"| F["Cause 4: Ghost Cells / ArrayFormulas in Empty Rows"]
+    B -->|"Sheets API Quota Level"| E["Cause 4: HTTP 429 Rate Limit Drop"]
+    B -->|"Sheet Grid Formatting"| F["Cause 3: Ghost Cells / ArrayFormulas in Empty Rows"]
     B -->|"AppSheet Post-Sync Evaluation"| G["Cause 5: Post-Write Security Filter Discrepancy"]
     B -->|"Spreadsheet Display"| H["Cause 6: Active Native Sheet Filters"]
 ```
@@ -151,35 +151,34 @@ graph TD
 ---
 
 #### Cause 1: Client Sync Queue Drop / Premature Browser Tab Closure (#1 Silent Cause)
-- **Mechanism:** When a user submits a form, the row is written to the device's **local client storage (IndexedDB in browser / SQLite in mobile)**. It has not yet reached Google Sheets. If `Delayed Sync` is enabled, or if the user immediately closes the browser tab, locks their phone, or goes offline before the orange sync spinner completes, the queued POST request is aborted and permanently lost.
+- **Mechanism:** When a user submits a form, the row is written to the device's **local client storage (IndexedDB in browser / SQLite in mobile)**. It has not yet reached Google Sheets. If the user immediately closes the browser tab, locks their phone, or goes offline before the orange sync spinner completes, the queued POST request is aborted and permanently lost.
 - **Fix:**
-  1. Disable `Delayed Sync` for critical transaction tables (`Settings > Performance > Delayed sync on data changes = OFF`).
-  2. Educate users to wait for the sync spinner icon to finish before closing the web tab or mobile app.
+  1. Educate users to wait for the sync to finish before closing the web tab or mobile app, and check for unsynced changes before closing. Do not disable Delayed Sync: the official docs say the queue protects against data loss and recommend pairing it with Automatic updates.
 
 ---
 
 #### Cause 2: Google Sheets API `appendCells` Index Lag & Concurrent Write Race Conditions
-- **Mechanism:** Google Sheets is a spreadsheet grid, not an ACID relational database with row-level locks. When 5–10 users submit rows within milliseconds:
+- **Mechanism:** Google Sheets is a spreadsheet grid, not an ACID relational database with row-level locks. When several users submit rows at nearly the same moment (community-reported overwrite scenarios; the exact mechanism below is a plausible model, not documented):
   1. User A's sync request calls Google Sheets API `AppendCells`. The API determines the last occupied row is Row 100 and prepares to write to Row 101.
-  2. User B's sync request arrives simultaneously. Because Google Sheets formula recalculations and API indexing take 500–1500ms to commit, the API also identifies Row 100 as the last occupied row and writes User B's data to **Row 101**, overwriting User A's row.
-- **Fix:** For apps with high concurrent write volume (>10 simultaneous active field users saving records continuously), migrate the backend from Google Sheets to **Google Cloud SQL (PostgreSQL / MySQL)**.
+  2. User B's sync request arrives simultaneously. If the sheet has not yet committed User A's write, the API may also identify Row 100 as the last occupied row and writes User B's data to **Row 101**, overwriting User A's row.
+- **Fix:** For apps with high concurrent write volume (no documented threshold; moving to a database is community advice), consider migrating the backend from Google Sheets to **Google Cloud SQL (PostgreSQL / MySQL)**.
 
 ---
 
 #### Cause 3: Ghost Formatted Cells & Blank Rows Below Data
 - **Mechanism:** If someone dragged formatting (borders, background color) or formulas (e.g. `=IF(A2="","",...)`) down to row 1,000 in Google Sheets:
-  - The Google Sheets API considers rows 2 through 1,000 as **occupied**.
+  - The Google Sheets API may consider rows 2 through 1,000 as **occupied** (unverified mechanism).
   - When AppSheet appends a new row, it scans for the first unoccupied row and writes to **Row 1,001**, leaving 900 blank rows in between.
-  - On subsequent syncs, AppSheet's data fetcher stops reading when it hits the blank row threshold, causing the newly added row at Row 1,001 to appear completely "missing" in the app!
+  - The "fetch stops at blank rows" explanation is unsourced; the official docs only confirm that deleting empty rows improves sync performance.
 - **Fix:**
   1. Open Google Sheets, select all empty rows below your actual data, right-click, and select **Delete rows**.
   2. Never drag formulas down empty rows. Use **`ARRAYFORMULA`** in Row 1 only.
 
 ---
 
-#### Cause 4: Google Drive API Rate Limits (`HTTP 429 Too Many Requests`)
-- **Mechanism:** Google Workspace imposes a rate limit of 300 write requests per minute per project on the Google Drive / Sheets API. If multiple users, background bots, webhook actions, and image uploads execute concurrently, Google rejects requests with `HTTP 429 Too Many Requests`. If background retries exhaust, the row addition is dropped.
-- **Fix:** Enable **Server Caching** for read-only tables and batch non-urgent automated bot notifications.
+#### Cause 4: Google Sheets API Rate Limits (`HTTP 429 Too Many Requests`)
+- **Mechanism:** The Google Sheets API quota is 300 read and 300 write requests per minute per project, and 60 per minute per user per project (not a Drive API limit). If many users and bots hit it concurrently, Google returns `HTTP 429 Too Many Requests` (whether a row is dropped when retries exhaust is unverified).
+- **Fix:** Enable **Server Caching** for read-only tables (reduces reads only) and batch non-urgent automated bot work.
 
 ---
 
@@ -190,7 +189,7 @@ graph TD
 ---
 
 #### Cause 6: Active Native Filters in Google Sheets (Not Filter Views)
-- **Mechanism:** If a manager applies a standard Google Sheet column filter (e.g., Filter by `Status = "Active"`), new rows appended by AppSheet with a different status are hidden by Google Sheets' native display filter.
+- **Mechanism (unverified):** If a manager applies a standard Google Sheet column filter (e.g., Filter by `Status = "Active"`), new rows with a different status are hidden in the spreadsheet display. API reads ignore display filters, so this is a visual confusion in the sheet, not a missing row in the app.
 - **Fix:** Never use standard Filters on AppSheet backend spreadsheets. Use **Filter Views** (`Data > Filter views > Create new filter view`), which do not affect the backend grid for other users or API integrations.
 
 ---
@@ -201,7 +200,7 @@ When a user reports a missing row, follow this diagnostic checklist in order:
 
 1. **Step 1: Check AppSheet Audit History (Server-Side Trace):**
    - Go to **Manage > Monitor > Audit History**.
-   - Filter by the user's email address and time range.
+   - Filter by the user's email address and time range (error codes below are unsourced; treat as indicative).
    - **If no `Add Row` record exists:** The failure is **Cause 1** (Client sync queue dropped due to premature app/tab closure).
    - **If an `Add Row` record exists with an error code (429, 503):** The failure is **Cause 4** (API quota exhaustion).
    - **If an `Add Row` record exists with status `Success`:** Proceed to Step 2.
@@ -218,10 +217,10 @@ When a user reports a missing row, follow this diagnostic checklist in order:
 
 ### Concurrency Prevention Checklist
 1. **Primary Key Initial Value:** Set to `UNIQUEID()` or `UNIQUEID("UUID")`. Never use `=MAX()+1` or row numbers.
-2. **Delayed Sync:** Turn OFF `Delayed Sync` for audit or transactional tables to force immediate backend flushing.
-3. **Form Submissions:** Enable auto-save on forms (`Auto save = ON`) and advise users to verify the sync spinner completes before closing the app.
+2. **Delayed Sync:** Keep it paired with Automatic updates; have users wait for sync to complete and check for unsynced changes before closing.
+3. **Form Submissions:** Advise users to verify the sync completes before closing the app (the `Auto save` form setting is unverified as a loss-prevention measure).
 4. **Sheet Hygiene:** Delete all blank trailing rows and columns in the Google Sheet. Ensure `ARRAYFORMULA` calculations reside in row 1 only.
-5. **High Concurrency Migration:** When more than 10 users actively write rows concurrently, migrate backend storage to **Cloud SQL** (PostgreSQL/MySQL).
+5. **High Concurrency Migration:** If concurrent-write problems persist, consider migrating backend storage to **Cloud SQL** (PostgreSQL/MySQL); no documented user-count threshold.
 
 ---
 
@@ -232,13 +231,13 @@ When a user reports a missing row, follow this diagnostic checklist in order:
 | :--- | :--- | :--- | :--- |
 | **Row Calculations** | `=B2*C2` dragged down | App Formula: `[Quantity] * [UnitPrice]` | **AppSheet App Formula**. Eliminates sheet calculation lag. |
 | **Array Auto-Expansion** | `ARRAYFORMULA(IF(ROW(A:A)=1, "Total", ...))` in Row 1 | N/A | **ARRAYFORMULA in Row 1 only**. Safe for read-only reporting. |
-| **Volatile Functions** | `=TODAY()`, `=NOW()`, `=RAND()` | `TODAY()`, `NOW()`, `UNIQUEID()` | **Never put volatile functions in Google Sheets**. They force a full sheet recalculation on every edit. |
+| **Volatile Functions** | `=TODAY()`, `=NOW()`, `=RAND()` | `TODAY()`, `NOW()`, `UNIQUEID()` | **Avoid volatile functions in Google Sheets** (they recalculate frequently and can slow large sheets). |
 | **Lookups across sheets** | `=VLOOKUP(...)`, `=QUERY(...)` | `LOOKUP(...)`, Dereference `[Ref].[Col]` | **AppSheet Dereferencing**. Avoids Sheet lookup freezes. |
 
 ---
 
 ### Google Apps Script Integration
-AppSheet Automations can invoke Google Apps Script directly with zero authentication setup:
+AppSheet Automations can invoke Google Apps Script directly (authorization requirements unverified):
 
 #### Use Case: Call Apps Script from AppSheet Bot Task
 1. In AppSheet Bot, add a Task with type: **`Call a script`**.
@@ -261,8 +260,8 @@ AppSheet Automations can invoke Google Apps Script directly with zero authentica
 
 ### Sheet Performance & Storage Hygiene Rules
 1. **Trim the Grid:**
-   - Default Google Sheets create 1,000 rows $\times$ 26 columns (26,000 cells). If your table only has 50 rows and 8 columns, delete rows 51–1000 and columns I–Z.
-   - Google Sheets allocates memory for every cell in the grid. Trimming unused cells speeds up API read/write operations by up to 500ms per call.
+   - New Google Sheets typically start at 1,000 rows $\times$ 26 columns (26,000 cells; unverified). If your table only has 50 rows and 8 columns, delete rows 51–1000 and columns I–Z.
+   - Google Sheets allocates memory for every cell in the grid. Trimming unused cells can help API performance (the docs confirm deleting empty rows improves speed; no timing figure).
 2. **Isolate Backend Data from Reporting Dashboards:**
    - Keep raw AppSheet tables on dedicated tabs with zero cell formatting, zero conditional formatting, and zero pivot tables.
    - Build reporting dashboards and charts on separate linked sheets or in Looker Studio reading from the raw data.
