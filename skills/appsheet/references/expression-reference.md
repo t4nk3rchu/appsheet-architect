@@ -35,18 +35,19 @@ Retrieves a list of column values from a table or slice matching specific condit
   ```
 
 ### `LOOKUP(Value, Table, LookupColumn, ResultColumn)`
-Finds the first scalar value in `ResultColumn` where `LookupColumn` matches `Value`.
+Returns a single value from `ResultColumn` where `LookupColumn` matches `Value` (one value even if several rows match). `Table`, `LookupColumn` and `ResultColumn` must be literal text. LOOKUP wraps `ANY(SELECT(...))`.
+**Pitfall:** inside `Value`, an unqualified `[Col]` is evaluated against the looked-up table and matches every row. Reference the current row with `[_THISROW].[Col]`.
 - **Example 1 (Customer Contact):** Look up a customer's billing email given their customer ID.
   ```appsheet
-  LOOKUP([CustomerID], "Customers", "CustomerID", "BillingEmail")
+  LOOKUP([_THISROW].[CustomerID], "Customers", "CustomerID", "BillingEmail")
   ```
 - **Example 2 (Price Tiering):** Retrieve the unit wholesale cost for a selected SKU from the catalog.
   ```appsheet
-  LOOKUP([SKU], "ProductCatalog", "SKU", "WholesalePrice")
+  LOOKUP([_THISROW].[SKU], "ProductCatalog", "SKU", "WholesalePrice")
   ```
 
 ### `FILTER("Table", [Condition])`
-Returns a list of Row Keys from the target table where the condition evaluates to `TRUE`.
+Returns an unsorted list of Row Keys (Refs) from the target table where the condition evaluates to `TRUE`.
 - **Example 1 (Low Inventory Alert):** Return all inventory item keys where stock has fallen below the reorder threshold.
   ```appsheet
   FILTER("Inventory", [QuantityOnHand] <= [ReorderPoint])
@@ -128,10 +129,9 @@ Splits a delimited text string into an `EnumList` / `List`.
   ```appsheet
   SPLIT([TagsInput], ", ")
   ```
-- **Example 2 (Line-Break Parsing):** Split multi-line user comments by newline characters.
+- **Example 2 (Semicolon-Separated Values):** Split a semicolon-delimited string (the delimiter is case-sensitive).
   ```appsheet
-  SPLIT([MultiLineNotes], " 
- ")
+  SPLIT([SemicolonValues], ";")
   ```
 
 ### `INTERSECT(List1, List2)`
@@ -145,19 +145,19 @@ Returns elements common to both lists.
   ISNOTBLANK(INTERSECT(SPLIT(USERSETTINGS("Roles"), ","), LIST("Admin", "Director", "Finance")))
   ```
 
-### `UNION(List1, List2)`
-Combines two lists into a single list and eliminates duplicates.
+### `UNIQUE(List1 + List2)` (combine lists; there is no `UNION()` function)
+The `+` operator combines two lists and preserves duplicates. Wrap in `UNIQUE()` to de-duplicate.
 - **Example 1 (Merged Mailing List):** Merge direct assignees and CC'd reviewers without duplicating emails.
   ```appsheet
-  UNION([AssigneesList], [ReviewersList])
+  UNIQUE([AssigneesList] + [ReviewersList])
   ```
 - **Example 2 (Multi-Warehouse Inventory):** Combine parts stored in both the North and South warehouse locations.
   ```appsheet
-  UNION(SELECT(NorthWarehouse[PartID], TRUE), SELECT(SouthWarehouse[PartID], TRUE))
+  UNIQUE(SELECT(NorthWarehouse[PartID], TRUE) + SELECT(SouthWarehouse[PartID], TRUE))
   ```
 
 ### `List1 - List2` (List Subtraction)
-Removes all elements present in `List2` from `List1`.
+Removes all elements present in `List2` from `List1`. Keeps the order of the left list (community: duplicates in the left list are also collapsed).
 - **Example 1 (Incomplete Steps):** Find remaining onboarding checklist steps by subtracting completed items.
   ```appsheet
   [AllOnboardingSteps] - [CompletedSteps]
@@ -249,7 +249,7 @@ Inverts the boolean value of a condition.
   ```
 - **Example 2 (Excluding Blacklisted Domains):** Validate customer email in `Valid_If`.
   ```appsheet
-  NOT(IN(RIGHT([Email], 12), LIST("@example.com", "@test.org")))
+  NOT(IN(MID([Email], FIND("@", [Email]), 100), LIST("@example.com", "@test.org")))
   ```
 
 ### `ISBLANK(Value)` & `ISNOTBLANK(Value)`
@@ -292,14 +292,14 @@ Joins multiple text strings, numbers, or column values together.
   ```
 
 ### `TEXT(Value, [FormatPattern])`
-Formats numbers, dates, times, or durations as text strings according to standard format patterns.
-- **Example 1 (Currency Display):** Format a numeric price as formatted US currency.
+The two-argument form formats Date, DateTime and Time values only (tokens such as `YYYY`, `MM`, `DD`, `MMMM`, `DDDD`, `HH`). Number/currency patterns like `"$#,##0.00"` are not supported: use `TEXT([x])` (follows the column's type details) or a Decimal/Price column.
+- **Example 1 (Month Code):** Format a date as a year-month code.
   ```appsheet
-  TEXT([TotalAmount], "$#,##0.00")
+  TEXT([CreatedDate], "YYYYMM")
   ```
-- **Example 2 (Date and Time for Email Templates):** Format a timestamp for customer notification emails.
+- **Example 2 (Date for Email Templates):** Format a timestamp's date for customer notification emails.
   ```appsheet
-  TEXT([ScheduledStart], "dddd, MMMM DD, YYYY 'at' hh:mm A")
+  TEXT([ScheduledStart], "DDDD, MMMM DD, YYYY")
   ```
 
 ### `LEFT(Text, Count)`, `RIGHT(Text, Count)`, `MID(Text, Start, Count)`
@@ -335,11 +335,11 @@ Finds the 1-based start position of `SearchText` inside `TargetText`. Returns 0 
   FIND("URGENT", UPPER([Subject])) > 0
   ```
 
-### `LOWER(Text)`, `UPPER(Text)`, `PROPER(Text)`, `TRIM(Text)`
-Transforms string casing and removes leading/trailing/duplicate spaces.
-- **Example 1 (Name Normalization):** Format user-entered names with proper capitalization.
+### `LOWER(Text)`, `UPPER(Text)`, `TRIM(Text)`
+Transforms string casing and trims spaces. There is no `PROPER()` function in AppSheet.
+- **Example 1 (Single-Word Capitalization):** Capitalize the first letter of a one-word name (no per-word proper case built in).
   ```appsheet
-  PROPER(TRIM([RawNameInput]))
+  CONCATENATE(UPPER(LEFT(TRIM([RawNameInput]), 1)), LOWER(MID(TRIM([RawNameInput]), 2, 100)))
   ```
 - **Example 2 (Email Normalization for Matching):** Standardize email addresses to lowercase before comparisons.
   ```appsheet
@@ -390,19 +390,19 @@ Returns current date, current timestamp (date + time), or current time of day.
   TIMENOW() < "12:00:00"
   ```
 
-### `DATE(Year, Month, Day)`, `TIME(Hours, Minutes, Seconds)`, `DATETIME(Date, Time)`
-Constructs temporal values from numerical or column components.
+### `DATE(when)`, `TIME(when)`, `DATETIME(when)`
+Each takes ONE argument and converts a Date, DateTime or Time value (or parseable text) to that type. They do not build values from separate year/month/day or hour/minute parts.
 - **Example 1 (Construct Date from Year/Month Picker):** Build a first-of-the-month date from dropdown selections.
   ```appsheet
-  DATE([SelectedYear], [SelectedMonth], 1)
+  DATE(CONCATENATE([SelectedMonth], "/1/", [SelectedYear]))
   ```
 - **Example 2 (Combining Separate Date and Time Columns):** Create a unified timestamp from separate date and time fields.
   ```appsheet
-  DATETIME([EventDate], [StartTime])
+  [EventDate] + ([StartTime] - "00:00:00")
   ```
 
-### `YEAR(Date)`, `MONTH(Date)`, `DAY(Date)`, `HOUR(Time/Duration)`, `MINUTE(Time/Duration)`
-Extracts individual numeric components from dates, times, and durations.
+### `YEAR(Date)`, `MONTH(Date)`, `DAY(Date)`, `HOUR(Duration)`, `MINUTE(Duration)`
+Extracts individual numeric components from dates (`YEAR`/`MONTH`/`DAY`) and durations (`HOUR`/`MINUTE`). `HOUR`/`MINUTE` require a Duration: `HOUR(NOW())` errors; use `HOUR(TIME(NOW()) - "00:00:00")`.
 - **Example 1 (Fiscal Year Grouping):** Group sales records by invoice year in a slice.
   ```appsheet
   YEAR([InvoiceDate]) = YEAR(TODAY())
@@ -423,8 +423,8 @@ Returns the last calendar day of the month offset by `MonthsOffset` (0 = current
   EOMONTH(TODAY(), 3)
   ```
 
-### `WORKDAY(StartDate, NumDays)`
-Calculates a target date by adding `NumDays` business days to `StartDate`, skipping Saturdays and Sundays.
+### `WORKDAY(StartDate, NumDays, [Holidays])`
+Calculates a target date by adding `NumDays` business days to `StartDate`, skipping Saturdays and Sundays (and any dates in the optional `Holidays` list).
 - **Example 1 (Standard 5-Day Business SLA):** Compute promised delivery date skipping weekends.
   ```appsheet
   WORKDAY(TODAY(), 5)
@@ -434,15 +434,15 @@ Calculates a target date by adding `NumDays` business days to `StartDate`, skipp
   WORKDAY([ReceivedDate], 10)
   ```
 
-### `TOTALHOURS(Duration)`, `TOTALDAYS(Duration)`, `TOTALMINUTES(Duration)`
-Converts elapsed `Duration` spans into numeric counts for mathematical calculations.
+### `TOTALHOURS(Duration)`, `TOTALMINUTES(Duration)`, `TOTALSECONDS(Duration)`
+Converts elapsed `Duration` spans into numeric counts for mathematical calculations. There is no `TOTALDAYS()`; use `TOTALHOURS(x)/24`.
 - **Example 1 (Payroll Calculation from Clock In/Out):** Calculate total pay from shift duration.
   ```appsheet
   TOTALHOURS([ClockOutTime] - [ClockInTime]) * [HourlyRate]
   ```
 - **Example 2 (Ticket Age in Days):** Calculate how many continuous days a support ticket has been open.
   ```appsheet
-  TOTALDAYS(NOW() - [CreatedTimestamp])
+  TOTALHOURS(NOW() - [CreatedTimestamp]) / 24
   ```
 
 ---
@@ -464,11 +464,11 @@ Performs aggregate statistical computations across a list of numbers or decimals
   MIN(SELECT(VendorBids[BidAmount], [RFP_ID] = [_THISROW].[RFP_ID]))
   ```
 
-### `ROUND(Number, [Digits])`, `CEILING(Number)`, `FLOOR(Number)`
-Rounds numeric values to decimal precisions or whole integer boundaries.
+### `ROUND(Number)`, `CEILING(Number)`, `FLOOR(Number)`
+Rounds numeric values to whole integers. `ROUND` takes a single argument (`ROUND(x, 2)` errors); to round to decimals, scale first.
 - **Example 1 (Sales Tax Rounding):** Round calculated sales tax to 2 decimal places.
   ```appsheet
-  ROUND([Subtotal] * [TaxRate], 2)
+  ROUND([Subtotal] * [TaxRate] * 100) / 100.0
   ```
 - **Example 2 (Shipping Container Calculation with CEILING):** Calculate boxes required when items must fit in boxes of 12.
   ```appsheet
@@ -528,7 +528,7 @@ Generates a random integer between `Min` and `Max` inclusive.
 ## 6. Context & Utility Functions
 
 ### `USEREMAIL()`, `USERNAME()`, `USERROLE()`
-Returns identity details of the currently signed-in AppSheet user.
+Returns identity details of the currently signed-in AppSheet user. `USERNAME()` is deprecated and often returns blank; prefer `USEREMAIL()`.
 - **Example 1 (Defaulting Creator Identity):** Pre-populate author email in Initial Value.
   ```appsheet
   USEREMAIL()
@@ -553,15 +553,15 @@ Reads a configured value from the user settings menu (such as selected branch, w
   IF(USERSETTINGS("Language") = "ES", "Bienvenido", "Welcome")
   ```
 
-### `CONTEXT("View")`, `CONTEXT("ViewType")`, `CONTEXT("Device")`, `CONTEXT("AppName")`
-Inspects the active runtime UI state and device context.
+### `CONTEXT("View")`, `CONTEXT("ViewType")`, `CONTEXT("Host")`, `CONTEXT("AppName")`
+Inspects the active runtime UI state and execution context. Other keys: `Table`, `OwnerEmail`. `CONTEXT("Device")` is a device UUID, not a form factor, and there is no phone/desktop key. `View`/`ViewType` are blank outside a view (e.g. automations).
 - **Example 1 (Form-Only Field Visibility):** Show guidance notes only when the record is viewed inside a Form view.
   ```appsheet
   CONTEXT("ViewType") = "Form"
   ```
-- **Example 2 (Hiding Heavy Charts on Mobile):** Hide data-heavy charts on mobile devices.
+- **Example 2 (Server vs Client Evaluation):** Detect where the expression runs (`"Server"`, `"Browser"` or `"Device"`).
   ```appsheet
-  NOT(CONTEXT("Device") = "Mobile")
+  CONTEXT("Host") = "Server"
   ```
 - **Example 3 (Specific View Logic):** Allow edits only when accessing through the dedicated review view.
   ```appsheet
@@ -569,7 +569,7 @@ Inspects the active runtime UI state and device context.
   ```
 
 ### `UNIQUEID([Type])`
-Generates a unique random alphanumeric identifier. Standard 8-char or `"UUID"`.
+Generates a random alphanumeric identifier: 8 chars by default, or `"UUID"` (version 4) / `"PackedUUID"` (22 chars). Not strictly guaranteed unique, but a duplicate is virtually impossible.
 - **Example 1 (Primary Key Generation):** Set Initial Value for row keys to prevent key collisions.
   ```appsheet
   UNIQUEID()
@@ -583,8 +583,8 @@ Generates a unique random alphanumeric identifier. Standard 8-char or `"UUID"`.
 
 ## 7. Deep Link & Navigation Functions
 
-### `LINKTOVIEW("ViewName")`
-Navigates the user directly to a named view within the current application.
+### `LINKTOVIEW("ViewName", [AppName])`
+Navigates the user directly to a named view (optionally in another app via the `app-name` argument). `LINKTOROW` and `LINKTOFORM` also accept an optional trailing `app-name`.
 - **Example 1 (Return to Dashboard Action):** Redirect user to main summary dashboard upon completing a workflow.
   ```appsheet
   LINKTOVIEW("Operations_Dashboard")
@@ -595,7 +595,7 @@ Navigates the user directly to a named view within the current application.
   ```
 
 ### `LINKTOFILTEREDVIEW("ViewName", [FilterCondition])`
-Navigates to a view while dynamically applying a client-side filter condition.
+Navigates to a view while dynamically applying a filter condition. It cannot link to another app.
 - **Example 1 (Customer Order History):** Open Orders table showing only rows belonging to the clicked customer.
   ```appsheet
   LINKTOFILTEREDVIEW("Orders_Table", [CustomerID] = [_THISROW].[CustomerID])
@@ -606,7 +606,7 @@ Navigates to a view while dynamically applying a client-side filter condition.
   ```
 
 ### `LINKTOROW([Key], "DetailViewName")`
-Opens a specific record identified by its row Key in a specified Detail or Form view.
+Opens a specific record identified by its row Key in a specified view.
 - **Example 1 (Drilldown from Summary Deck):** Open full details for an invoice when tapped in a summary chart.
   ```appsheet
   LINKTOROW([InvoiceID], "Invoice_Detail_View")
@@ -627,15 +627,15 @@ Opens a form view and pre-populates specified fields with initial values.
   LINKTOFORM("Quote_Form", "CustomerID", [CustomerID], "DiscountRate", [DiscountRate], "SalesPerson", USEREMAIL())
   ```
 
-### `LINKTOAPP("AppID")`
-Launches or switches to a different AppSheet application within the user's account.
+### `LINKTOAPP("AppName")`
+Launches a different AppSheet application. The argument is the app's `appName` URL parameter (e.g. `WarehouseManager-1029384`), not a Short Name. The `#view=`/`&row=` suffixes are not documented.
 - **Example 1 (Switching to Field Inspection App):** Open the companion warehouse management app.
   ```appsheet
   LINKTOAPP("WarehouseManager-1029384")
   ```
-- **Example 2 (Cross-App Deep Link with Specific View):** Switch to another app and navigate to a specific customer record.
+- **Example 2 (Cross-App Deep Link with Specific View):** Use `LINKTOROW` with its `app-name` argument to open a specific record in another app.
   ```appsheet
-  LINKTOAPP(CONCATENATE("FleetTracking-992817#view=Vehicle_Detail&row=", [VehicleID]))
+  LINKTOROW([VehicleID], "Vehicle_Detail", "FleetTracking-992817")
   ```
 
 ### `LINKURL("https://...")`
@@ -714,15 +714,16 @@ OR(
 -- In Initial Value for LineItemNumber:
 COUNT(SELECT(OrderLineItems[ID], [OrderID] = [_THISROW].[OrderID])) + 1
 ```
+Not safe for concurrent adds (community-reported): two users can get the same number.
 
 ### ❌ Anti-Pattern 1: Using `LOOKUP()` when a `Ref` exists
-- **Bad:** `LOOKUP([CustomerRef], "Customers", "CustomerID", "Email")` *(Forces full table scan)*
-- **Good:** `[CustomerRef].[Email]` *(Uses in-memory indexed pointer)*
+- **Bad:** `LOOKUP([_THISROW].[CustomerRef], "Customers", "CustomerID", "Email")` *(LOOKUP wraps `ANY(SELECT(...))`; more verbose)*
+- **Good:** `[CustomerRef].[Email]` *(Simpler, recommended for Ref columns)*
 
 ### ❌ Anti-Pattern 2: Missing `[_THISROW]` in `SELECT()`
 - **Bad:** `SELECT(Tasks[TaskID], [ProjectID] = [ProjectID])` *(Compares table column with itself; always true)*
 - **Good:** `SELECT(Tasks[TaskID], [ProjectID] = [_THISROW].[ProjectID])` *(Compares child ProjectID with current row)*
 
 ### ❌ Anti-Pattern 3: Nested `SELECT()` in Virtual Columns over large tables
-- **Bad:** `SUM(SELECT(Logs[Hours], [EmployeeID] = [_THISROW].[EmployeeID]))` in a 50,000-row table *(Recomputes on every sync)*
+- **Bad:** `SUM(SELECT(Logs[Hours], [EmployeeID] = [_THISROW].[EmployeeID]))` in a 50,000-row table *(Can be expensive on large tables; unbenchmarked)*
 - **Good:** Use `REF_ROWS("Logs", "EmployeeID")` with `SUM([Related Logs][Hours])` or aggregate periodically via Automations.

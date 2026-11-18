@@ -1,6 +1,6 @@
 # AppSheet Advanced UI/UX, Dynamic SVG & HTML Guide
 
-This guide details advanced techniques for elevating AppSheet UI/UX using **HTML Formatting in `LongText` columns**, zero-latency **Dynamic SVG Generation**, and **QuickChart.io** visual integration, incorporating verified patterns and constraints from the AppSheet developer community (`discuss.google.dev`).
+This guide details advanced techniques for elevating AppSheet UI/UX using **HTML Formatting in `LongText` columns**, inline **Dynamic SVG Generation**, and **QuickChart.io** visual integration, incorporating verified patterns and constraints from the AppSheet developer community (`discuss.google.dev`).
 
 ---
 
@@ -11,7 +11,8 @@ In AppSheet, rich-text HTML rendering is **not** handled by standard `Show` colu
 
 1. **Column Setup:** Set column type to **`LongText`**.
 2. **Text Format Option:** In the column definition settings, set **Text format** to **`HTML`** (or `Markdown`).
-3. **Supported Views:** Rich-formatted HTML is rendered natively in **Detail views** (and read-only Form preview). In Table, Deck, or Card views, AppSheet renders the content as plain text or strips tags to avoid breaking layout grids.
+3. **Supported Views:** Rich-formatted HTML is rendered in **Detail views** (the only documented place; official announcement: https://discuss.google.dev/t/rich-text-formatting-in-preview-program/74589). In Table, Deck, or Card views the column shows the raw text, so the **tags stay visible as literal text** (they are not stripped). Do not rely on Form preview rendering (unverified).
+4. **Line breaks:** a 2025 community bug report showed HTML-format LongText dropping newline characters; use `<br>` / `<p>` explicitly, or `SUBSTITUTE([Notes], CHAR(10), "<br>")` for free-text fields (https://discuss.google.dev/t/bug-appsheet-longtext-html-formatting-issue-no-line-breaks/187352).
 
 ---
 
@@ -25,21 +26,21 @@ AppSheet enforces a strict HTML sanitizer for security and cross-platform layout
 | **Headings & Hierarchy** | `<h1>`, `<h2>`, `<h3>`, `<h4>`, `<h5>`, `<h6>` | Renders clean section titles in Detail views. |
 | **Structure & Flow** | `<p>`, `<br>`, `<hr>`, `<blockquote>` | Paragraphs, line breaks, dividers, and indented callout quotes. |
 | **Lists** | `<ul>`, `<ol>`, `<li>` | Bulleted and numbered lists. |
-| **Links & Media** | `<a href="...">`, `<img src="..." width="..." height="...">` | Clickable hyperlinks and dynamic inline images. |
+| **Links & Media** | `<a href="...">`, `<img src="...">` | Clickable hyperlinks and dynamic inline images. **All other attributes are removed**: only `a` `href`/`name`/`target` and `img` `src` survive (no `width`, `height`, `style`, `class`). |
 | **Tables** | `<table>`, `<tbody>`, `<tr>`, `<td>`, `<th>` | Tabular data grids (rendered with default theme table styling). |
 
 #### ❌ What is STRIPPED or NOT Supported by AppSheet's HTML Sanitizer:
-- ❌ **`<div>` and `<span>` Tags:** Stripped or rendered as unstyled plain text blocks.
-- ❌ **`<font>` Tag:** Stripped by the modern HTML sanitizer.
-- ❌ **Inline CSS `style="..."` Attributes:** **ALL inline CSS styles are stripped!** Expressions like `<p style="color:red; background:#eee;">` or `<td style="border: 1px solid black;">` will have their `style` attribute removed.
-- ❌ **Custom CSS / Classes:** `<style>`, `<link>`, and `class="..."` are removed.
-- ❌ **JavaScript:** `<script>`, `onclick`, and event handlers are completely blocked.
-- ❌ **`Show` Columns:** Do not have the `HTML` text format selector; `Show` columns only support plain text and basic Markdown formatting.
+- ❌ **`<div>`, `<span>`, `<font>` Tags:** Not in the supported list; the announcement says unsupported tags render as plain text (not individually documented; assume unsupported).
+- ❌ **ALL attributes except `a` `href`/`name`/`target` and `img` `src`:** Includes inline CSS `style="..."`, `class`, **`width`/`height` on `<img>`, and `colspan`/`rowspan` on `<td>`**. Expressions like `<p style="color:red">` or `<td colspan='3'>` lose the attribute.
+- ❌ **Custom CSS:** `<style>`/`<link>` tags are not supported (`class` is removed like every other attribute).
+- ❌ **JavaScript:** `<script>` and `onclick` are not in the whitelist (assume blocked; not explicitly documented).
+- ❌ **`Show` Columns:** Have no `HTML` text-format selector (Show categories are Text, URL, Image, Video; Markdown support there is unverified).
 
 > [!TIP]
 > **When to use HTML vs Dynamic SVG:**
 > - Use **`LongText` (HTML format)** for structured documents, audit logs, bullet lists, blockquotes, inline hyperlinks (`<a>`), and simple tables.
-> - Use **Dynamic SVG (Image type)** whenever you need custom brand colors, background fills, rounded corners, borders, badges, progress bars, or metric cards (because SVGs support full vector styling that is never stripped).
+> - Use **Dynamic SVG (Show column with category Image, or Image type)** whenever you need custom brand colors, background fills, rounded corners, borders, badges, progress bars, or metric cards. Presentation attributes (`fill=`, `stroke=`) and `style=` on SVG elements survive; a `<style>` block inside the SVG may not in HTML LongText (see the warning in section 2).
+> - **Image-type column caveat:** an `Image` type column draws a gray frame around the SVG. The community prefers a **`Show` column with category `Image`** (https://discuss.google.dev/t/svg-experts-why-wont-this-svg-code-work-in-an-image-column/61540).
 
 ---
 
@@ -66,7 +67,7 @@ CONCATENATE(
   "<tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>",
   "<tr><td>Consulting Hours</td><td>", [Hours], "</td><td>", TEXT([Rate], "$#,##0.00"), "</td><td>", TEXT([Hours] * [Rate], "$#,##0.00"), "</td></tr>",
   "<tr><td>Site Travel</td><td>1</td><td>", TEXT([TravelFee], "$#,##0.00"), "</td><td>", TEXT([TravelFee], "$#,##0.00"), "</td></tr>",
-  "<tr><td colspan='3'><b>Grand Total Due</b></td><td><b>", TEXT([TotalDue], "$#,##0.00"), "</b></td></tr>",
+  "<tr><td><b>Grand Total Due</b></td><td></td><td></td><td><b>", TEXT([TotalDue], "$#,##0.00"), "</b></td></tr>",
   "</table>"
 )
 ```
@@ -75,7 +76,7 @@ CONCATENATE(
 ```appsheet
 CONCATENATE(
   "<p><b>Equipment Manual:</b> <a href=' ", [ManualURL], "'>Open PDF Document</a></p>",
-  "<p><img src=' ", [DiagramURL], "' width='320' /></p>",
+  "<p><img src=' ", [DiagramURL], "' /></p>",
   "<ul>",
   "<li>Check safety valve before starting.</li>",
   "<li>Verify pressure gauge is calibrated.</li>",
@@ -87,18 +88,21 @@ CONCATENATE(
 
 ### Embedding Dynamic SVGs Directly Inside `LongText` (HTML Format) Columns
 
-While AppSheet's HTML sanitizer strips all inline CSS (`style="..."`), you can **embed fully-styled Dynamic SVGs directly into a `LongText` (format: `HTML`) column** using `<img src="data:image/svg+xml;utf8,...">`. The `src` value takes double quotes, because the SVG inside it uses only single quotes.
+While AppSheet's HTML sanitizer strips all inline CSS (`style="..."`) and every attribute except `img` `src` / `a` `href`/`name`/`target`, you can **embed styled Dynamic SVGs inside a `LongText` (format: `HTML`) column** using `<img src="data:image/svg+xml;utf8,...">`. It works because `src` is a permitted attribute (community-reported; not in official docs). The `src` value takes double quotes, because the SVG inside it uses only single quotes.
 
-#### Why This Pattern Is Powerful:
-1. **Bypasses CSS Stripping:** Renders rich colored badges, progress meters, and status pills inline with headings, lists, and tables.
+> [!WARNING]
+> **Size the SVG itself.** `<img>` gets no `width`/`height`/`style` in HTML LongText, so use a plain `<img src=...>` and control size through the SVG's own `width`/`height`/`viewBox`. Keep SVG styling as inline presentation attributes (`fill=`, `stroke=`) or `style=` on SVG elements. A `<style>` block inside the SVG has been reported (community, ~Sep 2026) to make the whole SVG vanish in HTML LongText: https://discuss.google.dev/t/dynamic-svgs-in-html-longtext-columns-no-longer-working/400281.
+
+#### Why This Pattern Is Useful:
+1. **Works Around Attribute Stripping:** Renders colored badges, progress meters, and status pills inline with headings, lists, and tables.
 2. **Unified Document Layout:** Combines structured text, tabular data, and visual vector indicators in a single column in Detail views without needing multiple virtual `Image` columns.
-3. **Zero Network Latency:** Inlines the vector graphic as a Data URI without calling external image APIs.
+3. **No External Image Service:** The graphic is inlined as a Data URI instead of fetched from an image API.
 
 #### Implementation Rules:
 - Column Type: **`LongText`**
 - Text Format: **`HTML`**
-- Hex Colors: Wrap the SVG in **`ENCODEURL()`** (or manually encode `#` as **`%23`**).
-- Quotes: Follow the [Critical Quoting Rules](#-critical-quoting-rules-tested-in-appsheet) below — single quotes everywhere inside the SVG, `src=` wrapped in a real double quote supplied by the `'"'` literal.
+- Hex Colors: `#` must be URL-encoded in data URIs. Wrap the SVG in **`ENCODEURL()`** (or manually encode `#` as **`%23`**).
+- Quotes: Follow the [Critical Quoting Rules](#-critical-quoting-rules-tested-by-author) below — single quotes everywhere inside the SVG, `src=` wrapped in a real double quote supplied by the `'"'` literal.
 
 #### Example 4: Mixed HTML Document with Inline Dynamic SVG Status Badge
 ```appsheet
@@ -160,13 +164,18 @@ CONCATENATE(
 
 ---
 
-## 2. Dynamic SVGs (Zero-Latency Client-Side Visuals)
+## 2. Dynamic SVGs (Client-Side Visuals)
 
 ### Why Use Dynamic SVGs in AppSheet?
-- **Zero Network Overhead:** SVGs are delivered via client-side `data:image/svg+xml;utf8,...` Data URIs. No HTTP image requests are sent to any external server.
-- **Full Styling Support:** Unlike HTML in AppSheet (which strips CSS `style`), SVGs preserve all vector styling (`fill`, `stroke`, `rx`, `viewBox`, `text-anchor`, `font-size`, `font-family`, `transform`).
-- **Zero Latency:** Renders instantly in mobile WebViews and desktop browsers.
+- **No External Image Request:** SVGs are delivered via `data:image/svg+xml;utf8,...` Data URIs built from the row, so no image-hosting service is needed (performance not measured; the community warns very complex SVGs can be slow on older devices).
+- **Rich Styling Support:** Unlike HTML in AppSheet (which strips CSS `style`), SVG presentation attributes (`fill`, `stroke`, `rx`, `viewBox`, `text-anchor`, `font-size`, `font-family`, `transform`) and `style=` on SVG elements are preserved. **Exception:** a `<style>` block inside the SVG is at risk in HTML LongText (see warning below).
 - **Dynamic & Reactive:** Vector attributes change dynamically based on row values.
+
+### Where to Put the Formula
+- **Preferred:** a virtual column of type **`Show`** with category **`Image`**. An `Image`-type column draws a gray frame around the SVG; the community prefers Show + Image (https://discuss.google.dev/t/svg-experts-why-wont-this-svg-code-work-in-an-image-column/61540).
+- **Inside HTML LongText:** wrap in `<img src="...">` (Templates 4/6/examples 4-5). Plain `<img>` only, no size attributes.
+- **Size limit:** a Google Sheets cell holds at most 50,000 characters, so a long SVG string stored in a Sheets column can be truncated. Compute it in a virtual column instead of storing it (https://discuss.google.dev/t/dynamic-svg-graphics/76674).
+- Very complex SVGs may be slow on older devices (same thread).
 
 ---
 
@@ -176,7 +185,7 @@ Instead of manually encoding hex `#` colors to `%23` or escaping spaces and unic
 
 ```appsheet
 CONCATENATE(
-  "<img style='width: 100%; height: auto;' src=",
+  "<img src=",
   '"',
   "data:image/svg+xml;utf8,",
   ENCODEURL(
@@ -190,7 +199,9 @@ CONCATENATE(
 )
 ```
 
-### ⚠️ Critical Quoting Rules (Tested in AppSheet)
+### ⚠️ Critical Quoting Rules (Tested by Author)
+
+> Tested by the author; not officially documented. A community thread suggests **doubling the quotes** (`""`) as an alternative: https://discuss.google.dev/t/dynamic-svg-graphics/76674. If a rule below fails in your app, try that.
 
 AppSheet has **no backslash escape** (`\"` is not valid) and its parser mis-reads a string literal that ends in `'"`. Two rules, both mandatory:
 
@@ -205,13 +216,13 @@ AppSheet has **no backslash escape** (`\"` is not valid) and its parser mis-read
 The leading space ends up inside the attribute value (`stroke=' #1a237e'`). SVG trims it, so the output still renders correctly. Closing fragments that *start* with `'` (`"'/>"`, `"'>"`) are fine as they are.
 
 > [!TIP]
-> **Tested in AppSheet (see [Template 7](#template-7-tested-animated-vertical-stepper-defs--use--css-classes--smil)):** the SVG inside the data URI keeps its own `<style>` block with CSS classes, `<defs>` + `<use href='#id'/>` for reusable shapes, and SMIL `<animate>`. The HTML sanitizer's `<style>`/`class` stripping only applies to the outer HTML, not to markup inside the encoded SVG.
+> **WARNING: avoid `<style>` blocks in SVGs placed in HTML `LongText`.** The author once tested a `<style>` block with CSS classes inside the data-URI SVG as working, but community reports from ~Sep 2026 say SVGs containing `<style>` now **vanish entirely** in HTML LongText while still working in `Image` / `Show` Image columns (https://discuss.google.dev/t/dynamic-svgs-in-html-longtext-columns-no-longer-working/400281). Prefer **inline presentation attributes** (`fill='...'`, `stroke='...'`) or `style='...'` on the SVG elements. `<style>`/classes are only safe in Image columns. `<defs>` + `<use>` and SMIL `<animate>` are not covered by those reports and are unverified in HTML LongText (see [Template 7](#template-7-animated-vertical-stepper-image-column-only--at-risk-in-html-longtext)).
 
 #### Why `ENCODEURL()` is Superior:
 1. **Natural CSS Hex Colors:** Write `#ffffff`, `#10b981`, `#ef4444` directly without tedious manual `%23` conversion.
 2. **Full Unicode / Multi-Language Support:** Renders Vietnamese accents, Japanese, Chinese, Spanish, or emoji directly in `<text>` nodes without encoding corruption.
 3. **Seamless External Debugging:** The raw SVG string can be copied directly into tools like **SVGViewer**, VS Code, or browser DevTools for immediate live visual previewing.
-4. **Fluid Responsiveness:** Using `<img style='width: 100%; height: auto;' src='...'>` inside `LongText` (format: `HTML`) ensures the graphic scales automatically to fit mobile phones, tablets, and desktop AppSheet views without clipping.
+4. **Scaling:** `<img>` `style`/`width`/`height` are stripped in `LongText` (format: `HTML`), so scaling comes from the SVG itself: always set `viewBox` (plus the SVG's own `width`/`height`) on the root `<svg>`.
 
 ---
 
@@ -229,20 +240,22 @@ The leading space ends up inside the attribute value (`stroke=' #1a237e'`). SVG 
 
 | ❌ Failure Mode / Trap | Why It Fails in AppSheet | ✅ What To Do Instead |
 | :--- | :--- | :--- |
-| **Unencoded `#` in Hex Colors** (`fill='#28a745'`) | When not using `ENCODEURL()`, `#` is treated as a URL fragment identifier in mobile WebViews, cutting off the rest of the SVG string and rendering a blank image. | Wrap the entire SVG XML in **`ENCODEURL()`**, or manually encode `#` as `%23` (`fill='%2328a745'`). |
-| **Double Quote Syntax Collisions** | Double quotes inside formula strings, whether escaped with `\"` or doubled as `""`, break AppSheet's expression parser. | Use single quotes (`'`) for **all** SVG attributes. Emit the `src=` double quotes with the `'"'` / `'" />'` literals. |
-| **`'"` Right Before a Comma** (`stroke='",`) | The parser mis-reads the literal ending, and the formula fails or produces broken markup. | Insert a space: `stroke=' ",`. SVG trims the leading space in the value. |
-| **Missing `xmlns` Namespace** | Without `xmlns='http://www.w3.org/2000/svg'`, mobile WebViews and some browsers fail to identify the XML as vector graphics and render a broken icon. | Always include `xmlns='http://www.w3.org/2000/svg'` in the root `<svg>` element. |
-| **`<script>` Tags or Event Handlers** | AppSheet and mobile WebViews strip or block JavaScript execution for security. | Use pure declarative SVG vector properties and AppSheet formula conditions (`IFS()`, `IF()`). |
-| **External Fonts** (`@import url(...)`) | WebViews block cross-origin font downloads inside SVG Data URIs, causing text fallback or rendering failure. | Use standard system fonts: `font-family='system-ui, -apple-system, sans-serif'`. |
-| **Complex External Images** (`<image href='http...'>`) | Cross-origin image embedding in data URIs is blocked by browser CORS security policies. | Use native SVG vector shapes or embedded Base64 `<image href='data:image/png;base64,...' />`. |
-| **Fixed Dimensions without `viewBox`** | Hardcoding fixed widths without `viewBox` causes clipping on narrow mobile screens and blurriness on high-DPI tablets. | Always define `viewBox='0 0 W H'` and use `<img style='width: 100%; height: auto;' ...>` in HTML `LongText`. |
+| **Unencoded `#` in Hex Colors** (`fill='#28a745'`) | In a data URI `#` starts a URL fragment, so it must be encoded (standard URL behavior); otherwise the rest of the SVG string is cut off. | Wrap the entire SVG XML in **`ENCODEURL()`**, or manually encode `#` as `%23` (`fill='%2328a745'`). |
+| **Double Quote Syntax Collisions** (tested by author) | Per the author's tests, `\"` or doubled `""` inside formula strings broke the parser. A community thread suggests doubling quotes works (https://discuss.google.dev/t/dynamic-svg-graphics/76674); unreconciled. | Author's approach: single quotes (`'`) for **all** SVG attributes; emit the `src=` double quotes with the `'"'` / `'" />'` literals. Alternative to try: doubled quotes. |
+| **`'"` Right Before a Comma** (`stroke='",`) (tested by author) | Per the author's tests the parser mis-reads the literal ending. | Insert a space: `stroke=' ",`. SVG trims the leading space in the value. |
+| **Missing `xmlns` Namespace** | SVG used as an image generally needs `xmlns='http://www.w3.org/2000/svg'` (standard SVG-as-image behavior, not AppSheet-specific); without it a broken icon is typical. | Always include `xmlns='http://www.w3.org/2000/svg'` in the root `<svg>` element. |
+| **`<script>` Tags or Event Handlers** | SVG rendered via `<img>` / data URI does not run scripts or load external resources (standard browser rule, not AppSheet-specific). | Use pure declarative SVG vector properties and AppSheet formula conditions (`IFS()`, `IF()`). |
+| **External Fonts** (`@import url(...)`) | SVG-as-image cannot load external resources such as web fonts (browser rule), so text falls back. | Use standard system fonts: `font-family='system-ui, -apple-system, sans-serif'`. |
+| **External Images** (`<image href='http...'>`) | SVG-as-image cannot load external resources (browser sandbox rule, not CORS). | Use native SVG vector shapes or embedded Base64 `<image href='data:image/png;base64,...' />`. |
+| **Fixed Dimensions without `viewBox`** | Without `viewBox` the SVG cannot scale, and in HTML `LongText` you cannot rescale it via `<img>` attributes (stripped). | Always define `viewBox='0 0 W H'` plus the SVG's own `width`/`height` on the root `<svg>`. |
+| **`<style>` block in HTML `LongText`** | Community-reported (~Sep 2026): the whole SVG disappears. | Use `fill=`/`stroke=`/`style=` on elements; keep `<style>` for Image columns only. |
+| **Long SVG stored in a Sheets column** | Google Sheets cells hold at most 50,000 characters. | Compute the SVG in a virtual column. |
 
 ---
 
 ### ❌ Bad vs ✅ Good SVG Code Comparison
 
-#### ❌ Bad SVG Formula (Will Break on Mobile WebViews & Expression Parser)
+#### ❌ Bad SVG Formula (Will Break in the Expression Parser and as a Data URI)
 ```appsheet
 CONCATENATE(
   "data:image/svg+xml;utf8,<svg width="100" height="100">",
@@ -253,13 +266,13 @@ CONCATENATE(
 ```
 *Why it fails:*
 1. Unescaped double quotes (`"100"`) cause syntax parsing errors in AppSheet.
-2. Missing `xmlns='http://www.w3.org/2000/svg'` namespace causes rendering failure in WebViews.
-3. Unencoded `#` in `#ff5722` truncates the Data URI at the first color hash on Android/iOS devices.
+2. Missing `xmlns='http://www.w3.org/2000/svg'` namespace typically causes a broken image.
+3. Unencoded `#` in `#ff5722` truncates the Data URI at the first `#` (URL fragment).
 
 #### ✅ Good SVG Formula (Robust, Universally Compatible with `ENCODEURL()`)
 ```appsheet
 CONCATENATE(
-  "<img style='width: 100%; height: auto;' src=",
+  "<img src=",
   '"',
   "data:image/svg+xml;utf8,",
   ENCODEURL(
@@ -277,9 +290,9 @@ CONCATENATE(
 ```
 *Why it succeeds:*
 1. `ENCODEURL()` handles all `#` hex colors, spaces, and unicode characters automatically.
-2. Proper `xmlns` namespace and `viewBox` ensure flawless vector scaling across all mobile and desktop devices.
+2. Proper `xmlns` namespace and `viewBox` let the vector scale to its container.
 3. Separate `'"'` tokens and space padding ensure clean formula compilation in AppSheet.
-4. `<img style='width: 100%; height: auto;' />` ensures seamless responsive layout in `LongText` HTML views.
+4. Plain `<img src=...>` is used because `style`/`width`/`height` on `<img>` are stripped in `LongText` HTML; scaling comes from the SVG's `viewBox`.
 
 ---
 
@@ -308,7 +321,7 @@ CONCATENATE(
       "<text x='20' y='102' font-family='Arial, sans-serif' font-size='13' font-weight='bold' fill=' ",
       IFS([ChangePercentage] >= 0, "#2e7d32", TRUE, "#c62828"),
       "'>",
-      IFS([ChangePercentage] >= 0, "▲ +", TRUE, "▼ "), TEXT([ChangePercentage] * 100, "0.0%"), " vs last month",
+      IFS([ChangePercentage] >= 0, "▲ +", TRUE, "▼ "), CONCATENATE(ROUND(ABS([ChangePercentage]) * 1000) / 10.0, "%"), " vs last month",
       "</text>",
       "</svg>"
     )
@@ -334,7 +347,7 @@ CONCATENATE(
   "stroke-dashoffset=' ", TEXT(283 * (1 - MIN(LIST([Progress], 1.0))), "0"), "' ",
   "transform='rotate(-90 60 60)' />",
   "<text x='60' y='66' font-family='Arial, sans-serif' font-size='20' font-weight='bold' text-anchor='middle' fill='%23212121'>",
-  TEXT([Progress] * 100, "0%"),
+  CONCATENATE(ROUND([Progress] * 100), "%"),
   "</text>",
   "</svg>"
 )
@@ -422,15 +435,15 @@ CONCATENATE(
 
 ### Template 6: Production-Grade Multi-State Vertical Stepper (in `LongText` HTML)
 
-Generates a responsive, full-height vertical timeline with **state-aware step circles** (Pending numbered `01`, Active highlighted, Completed with vector checkmark `✓`, Rejected `X`, and Skipped `N/A`), connecting state lines, and multi-language/unicode text.
+Generates a full-height vertical timeline with **state-aware step circles** (Pending numbered `01`, Active highlighted, Completed with vector checkmark `✓`, Rejected `X`, and Skipped `N/A`), connecting state lines, and multi-language/unicode text.
 
 * **Column Setup:** Type **`LongText`**, Text format **`HTML`**.
-* **Responsive Styling:** `<img style='width: 100%; height: auto;' src="..." />` scales fluidly on all device screens.
+* **Sizing:** plain `<img src="..." />` (no `style`/`width`/`height`, which are stripped); the SVG's own `width`/`height`/`viewBox` controls scaling.
 * **Maintainability:** Uses `<g transform='translate(0, Y)'>` for clean modular stage positioning and `ENCODEURL()` for clean hex color & unicode handling.
 
 ```appsheet
 CONCATENATE(
-  "<img style='width: 100%; height: auto;' src=",
+  "<img src=",
   '"',
   "data:image/svg+xml;utf8,",
   ENCODEURL(
@@ -530,21 +543,21 @@ CONCATENATE(
 
 ---
 
-### Template 7: Tested Animated Vertical Stepper (`<defs>` + `<use>`, CSS Classes, SMIL)
+### Template 7: Animated Vertical Stepper (Image column only / at-risk in HTML LongText)
 
-A 6-stage training workflow stepper that has been **tested and renders in AppSheet** (`LongText`, format `HTML`). Use it as the reference implementation for the [Critical Quoting Rules](#-critical-quoting-rules-tested-in-appsheet).
+A 6-stage training workflow stepper. **WARNING, at risk:** it uses an internal `<style>` block with CSS classes. The author once saw it render in `LongText` (format `HTML`), but community reports from ~Sep 2026 say SVGs containing `<style>` vanish in HTML LongText while still working in `Image` / `Show` Image columns (https://discuss.google.dev/t/dynamic-svgs-in-html-longtext-columns-no-longer-working/400281). **Use it in an Image / Show-Image column**, or replace the classes with inline `fill=`/`font-size=` attributes before using it in HTML LongText. SMIL `<animate>` and `<defs>`/`<use>` support is unverified. Still useful as the reference for the [Critical Quoting Rules](#-critical-quoting-rules-tested-by-author) (tested by author).
 
 What it demonstrates:
 - **Quoting:** every SVG attribute uses `'`. Attribute values filled by an expression open with `' "` (e.g. `stroke=' ",`). The `src=` double quotes come from `'"'` and `'" />'`.
 - **Internal `<style>` + classes** (`.t`, `.s`, `.n`, `.g`, `.d` …) shrink every `<text>` node down to `class='t d'`. That cuts formula length a lot compared with repeating `font-family`/`font-size`/`fill` on each node.
 - **`<defs>` + `<use href='#id'/>`** reuse the pending (`#p`), active (`#a`) and done (`#ok`) circles, so each state is written once.
-- **SMIL `<animate>`** draws the ring and then the checkmark (`stroke-dashoffset` from 60 to 0, then 14 to 0, `fill='freeze'`) in every completed step.
+- **SMIL `<animate>`** draws the ring and then the checkmark (`stroke-dashoffset` from 60 to 0, then 14 to 0, `fill='freeze'`) in every completed step (animation support in AppSheet is unverified).
 - **Branch-local tails:** some `IFS` branches emit only the opening `<text ...>`, and the shared label (e.g. `IF([loại_hình_đào_tạo] = "Chứng Chỉ", ...)`) plus `</text>` follow after the `IFS`. This removes duplicated labels.
 - **Skipped state:** a dashed connector (`stroke-dasharray='4,4'`) and a dashed `N/A` circle when `[ký_thỏa_thuận]` is not `TRUE`.
 
 ```appsheet
 CONCATENATE(
-  "<img style='width: 100%; height: auto;' src=",
+  "<img src=",
   '"',
   "data:image/svg+xml;utf8,",
   ENCODEURL(CONCATENATE(
@@ -677,7 +690,7 @@ CONCATENATE(
 
 ## 4. QuickChart.io Visual Integration
 
-QuickChart renders web-standard Chart.js configurations into static image URLs.
+QuickChart renders web-standard Chart.js configurations into static image URLs. Community usage: https://discuss.google.dev/t/using-quickchart-in-appsheet/324637 (Image column with a chart URL; wrapping the config in `ENCODEURL()` is a common safe pattern, not confirmed in that thread).
 
 ### Standard Formula Pattern (Bar / Line / Radar / Donut Chart)
 ```appsheet
@@ -695,7 +708,7 @@ CONCATENATE(
 
 ### QuickChart Performance Best Practices & Safeguards
 1. **Never Put QuickChart in Large Multi-Row Tables:**
-   - If placed in a Virtual Column on a 2,000-row table, AppSheet attempts to download 2,000 HTTP images simultaneously during sync/scroll, causing client freezes and API rate limits.
+   - Each chart is an external HTTP request, and the QuickChart **free tier is limited** (community-reported: 1,000 charts/month, 60/min; https://discuss.google.dev/t/using-quickchart-in-appsheet/324637). A virtual column on a large table can exhaust that quickly; client slowdowns are plausible but unmeasured.
 2. **Restrict QuickChart to Dashboard / Parent Detail Views:**
    - Place QuickChart formulas only in single-record detail views or 1-row summary/dashboard tables.
 3. **Prefer Local SVGs for Simple Visuals:**

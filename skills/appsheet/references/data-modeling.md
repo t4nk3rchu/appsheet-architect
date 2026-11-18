@@ -11,10 +11,10 @@ AppSheet abstracts underlying databases (Google Sheets, PostgreSQL, Cloud SQL, M
 ### Core Architecture Rules:
 1. **Tables**: Every physical table or view in your data source maps to an AppSheet Table.
 2. **Primary Key Column**: Every table MUST have exactly one primary Key column.
-3. **Label Column**: Every table SHOULD have exactly one Label column for human-friendly dropdown display.
+3. **Label Column**: Every table SHOULD have a Label column (a column toggle in column settings) for human-friendly dropdown display.
 4. **Foreign Key Relations (`Ref` vs `Enum`)**: 
    - Use `Ref` when parent-child forms and reverse child lists (`REF_ROWS`) are required.
-   - Use `Enum` (Base Type: `Ref`) for standalone utility lookups to suppress unwanted reverse-reference Virtual Columns.
+   - Use `Enum` (Base Type: `Ref`) for standalone utility lookups to suppress unwanted reverse-reference Virtual Columns (community-reported; not in the official help).
 
 ---
 
@@ -49,7 +49,7 @@ AppSheet abstracts underlying databases (Google Sheets, PostgreSQL, Cloud SQL, M
 ### Suppressing Unwanted Virtual Columns: `Enum` (Base Type: `Ref`)
 When Table B needs to reference Table A for tagging or lookups (e.g. `Tasks[AssignedTo]` $\to$ `Users[Email]`), using a standard `Ref` column auto-generates `[Related Tasks]` on the `Users` table.
 - **Optimization:** Configure the column as **Type: `Enum`** with **Base Type: `Ref`** and set the Referenced Table.
-- **Result:** You get full dropdown selection and direct dereferencing (`[AssignedTo].[Department]`), but AppSheet **suppresses the auto-generated `[Related Tasks]` virtual column**, eliminating sync overhead on the parent table!
+- **Result (community-reported):** dropdown selection and direct dereferencing (`[AssignedTo].[Department]`) work, and the auto-generated `[Related Tasks]` virtual column is reportedly suppressed. The official docs note REF_ROWS delay mostly comes from fetching the table, so the sync saving may be modest; test before relying on it.
 
 ---
 
@@ -60,7 +60,7 @@ When Table B needs to reference Table A for tagging or lookups (e.g. `Tasks[Assi
 | **Storage Location** | Stored in Google Sheets / SQL Database | Stored only in AppSheet memory |
 | **Compute Frequency** | Computed once on row save / edit | Recomputed on every sync and row change |
 | **Formula Option** | Initial Value (editable) or App Formula (locks cell) | App Formula (always dynamic) |
-| **Sync Impact** | Zero sync latency after write | $O(N)$ sync cost per row on every sync |
+| **Sync Impact** | No recompute on sync | Recomputed for every row on every sync |
 | **Best Used For** | Persistent data, write-time snapshots, status | Dynamic live calculations, reverse Ref lists |
 
 ---
@@ -80,9 +80,9 @@ When Table B needs to reference Table A for tagging or lookups (e.g. `Tasks[Assi
 
 ## 6. Table Width & Column Count Best Practices
 
-AppSheet downloads all columns of every row during sync (even if hidden in views).
+AppSheet appears to download all columns of every row during sync (plausible, not explicitly stated in the docs).
 
-| Column Count | Category | Architectural Best Practice |
+| Column Count (rough rules of thumb, unverified; no official tiers) | Category | Architectural Best Practice |
 | :--- | :--- | :--- |
 | **< 30 Columns** | **Optimal** | Fast sync, minimal memory usage, instant form rendering. |
 | **30 – 50 Columns** | **Standard** | Typical for primary business entities. Keep Virtual Columns $\le 5$. |
@@ -94,27 +94,25 @@ AppSheet downloads all columns of every row during sync (even if hidden in views
 ## 7. Slices vs Security Filters
 
 ### Slices (Client-Side)
-- **Execution**: Evaluated on the client device after downloading table data.
+- **Execution**: Evaluated on the client device after downloading table data (consistent with the official "security filters vs slices" guidance).
 - **Purpose**: Creates custom filtered views (e.g. `"Pending Orders"`, `"My Tasks"`), subset columns, or modifies CRUD permissions for specific views.
 - **Security**: NOT suitable for hiding confidential data from unauthorized users (data is still transmitted to the device).
 
 ### Security Filters (Server-Side)
 - **Execution**: Evaluated on Google AppSheet servers prior to sending data to the client.
-- **Purpose**: Multi-tenant data isolation, GDPR/compliance, and minimizing device payload.
-- **Example Security Filter**:
+- **Purpose**: Restricting which rows reach the device, and minimizing device payload.
+- **Caveat**: Official docs describe security filters as "not a complete security solution"; do not claim they alone satisfy GDPR/compliance. Combine with data-source permissions and access control.
+- **Example Security Filter** (simple equality is pushed down to SQL backends; `OR()`/`NOT()` are not pushed down on MySQL/Postgres/SQL Server, so on large SQL tables prefer this form and give admins a separate unfiltered path/app or accept a full-table read):
   ```appsheet
-  OR(
-    USERROLE() = "Admin",
-    [OwnerEmail] = USEREMAIL()
-  )
+  [OwnerEmail] = USEREMAIL()
   ```
 
 ---
 
 ## 8. Performance Optimization Checklist
 
-1. **Avoid `SELECT()` in Virtual Columns**: Prefer `Ref` relationships with `[Related Items][Column]` dereferences.
-2. **Use `Enum (Base Type: Ref)` for Utility Links**: Prevents auto-generating dozens of `REF_ROWS()` virtual columns on master tables.
+1. **Avoid hand-written `SELECT()` in Virtual Columns**: Prefer `Ref` relationships with `[Related Items][Column]` dereferences (REF_ROWS is a SELECT internally, so this is qualitatively, not dramatically, cheaper).
+2. **Use `Enum (Base Type: Ref)` for Utility Links (community-reported)**: Reportedly prevents auto-generating dozens of `REF_ROWS()` virtual columns on master tables.
 3. **Apply 3-Tier Pragmatic Denormalization**: Snapshot point-in-time values at write time using `Initial Value` instead of runtime dereferencing virtual columns.
 4. **Use Server-Side Security Filters**: Filter out historical or archived rows from syncing to mobile devices.
-5. **Keep Column Counts Under 50**: Use the 1:1 Extension Table pattern for wide records.
+5. **Keep column counts modest (rule of thumb, unverified)**: Use the 1:1 Extension Table pattern for wide records.

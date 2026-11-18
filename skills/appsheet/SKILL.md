@@ -11,7 +11,7 @@ Google AppSheet is a no-code development platform for creating web and mobile ap
 ## When to Use
 Use this skill when:
 - Writing or debugging AppSheet expressions (`SELECT`, `LOOKUP`, `IFS`, `REF_ROWS`, `FILTER`, `USEREMAIL`, `CONTEXT`, dereferencing)
-- Refactoring heavy compute formulas (`MAXROW`, nested `SELECT`, deep dereferencing) into performant $O(1)$ alternatives
+- Refactoring heavy compute formulas (`MAXROW`, nested `SELECT`, deep dereferencing) into faster alternatives
 - Designing relational tables, primary keys (`UNIQUEID()` for transactions, `Email` for Workspace `Users`), labels, and `Ref` vs `Enum (Base Type Ref)` columns
 - Implementing the 3-Tier Pragmatic Denormalization architecture (Write-Time Snapshots, Event-Driven Bot Rollups, Slice Projections)
 - Designing rich UI/UX using supported HTML tags in `LongText` columns (whitelisted tags vs stripped CSS), zero-latency Dynamic SVGs (KPI cards, radial progress gauges, rating stars, status badges), and QuickChart.io
@@ -33,7 +33,7 @@ When NOT to use:
 | Task | Syntax | Example |
 | :--- | :--- | :--- |
 | **Filter Rows** | `SELECT(Table[Column], [Condition], [DistinctOnly])` | `SELECT(Orders[OrderID], [Status] = "Open")` |
-| **Single Lookup** | `LOOKUP(Value, Table, LookupColumn, ResultColumn)` | `LOOKUP([CustomerID], "Customers", "CustomerID", "Email")` |
+| **Single Lookup** | `LOOKUP(Value, Table, LookupColumn, ResultColumn)` | `LOOKUP([_THISROW].[CustomerID], "Customers", "CustomerID", "Email")` |
 | **Dereference (Parent)** | `[RefColumn].[TargetColumn]` | `[CustomerRef].[BillingAddress]` |
 | **Parent-Child Link** | `REF_ROWS("ChildTable", "ParentRefColumn")` | `REF_ROWS("OrderDetails", "OrderID")` |
 | **Filter Row Keys** | `FILTER("Table", [Condition])` | `FILTER("Tasks", [Status] = "Pending")` |
@@ -43,7 +43,6 @@ When NOT to use:
 | **State Transition** | `[_THISROW_BEFORE].[Col] <> [_THISROW_AFTER].[Col]` | `[_THISROW_BEFORE].[Status] <> "Done"` |
 | **Primary Key ID** | `UNIQUEID()` (Initial Value) | `UNIQUEID()` |
 | **Dynamic SVG** | `CONCATENATE("data:image/svg+xml;utf8,<svg ...", ... , "</svg>")` | ⚠️ Use single quotes everywhere inside the SVG, and write `' "` (with a space), never `'"`, before a comma: `"fill=' ", [Color], "'/>"`. See the UI/UX Guide. |
-| **Sync Projection** | $T_{\text{sync}} \approx N/3 + (R_{\max} \times C_{\max})/5000$ seconds | Quick baseline estimate |
 
 ## Architecture & Decision Guides
 
@@ -57,20 +56,20 @@ When NOT to use:
 ### Heavy Compute Formulas vs Fast Alternatives
 | Heavy Formula | Bottleneck | Fast Alternative | Performance Gain |
 | :--- | :--- | :--- | :--- |
-| `MAXROW("History", "Time", [ID] = [_THISROW].[ID])` in Virtual Column | $O(N \times M)$ scan per row on every sync | Physical `LatestRef` column updated by Bot on Row Add | **$100\times$ faster** ($O(1)$ pointer read) |
-| `SUM(SELECT(Items[Total], [OrderID] = [_THISROW].[OrderID]))` | Full table scan per row | Reverse-Ref dereference: `SUM([Related Items][Total])` | **$50\times$ faster** (uses internal pointer array) |
-| Repeated `LOOKUP(USEREMAIL(), "Users", "Email", "Role")` | Linear scan on every rule evaluation | `INDEX(Current_User[Role], 1)` on 1-row Slice | Instant in-memory cache read |
-| `ORDERBY(SELECT(...))` inside formula | In-memory sort on every recalculation | Use Slice with native sort order | Reduces mobile CPU throttling |
-| Native `Ref` on 15 child tables | Auto-generates 15 `REF_ROWS()` VCs on Parent | Use `Enum` (Base Type: `Ref`) for utility links | Suppresses unwanted VCs; saves sync memory |
+| `MAXROW("History", "Time", [ID] = [_THISROW].[ID])` in Virtual Column | Scans the History table for every row (rule of thumb, not benchmarked) | Physical `LatestRef` column updated by Bot on Row Add | Much cheaper (plain column read; unbenchmarked) |
+| `SUM(SELECT(Items[Total], [OrderID] = [_THISROW].[OrderID]))` | Table scan per row | Reverse-Ref dereference: `SUM([Related Items][Total])` | Clearer; `REF_ROWS` is documented as equivalent to SELECT/FILTER on the Ref column, so no speedup is guaranteed |
+| Repeated `LOOKUP(USEREMAIL(), "Users", "Email", "Role")` | Repeated lookup on every rule evaluation | `INDEX(Current_User[Role], 1)` on 1-row Slice (community-reported) | Fewer lookups (community-reported) |
+| `ORDERBY(SELECT(...))` inside formula | Sort recalculated with the formula | Use Slice with native sort order | Less formula work (unbenchmarked) |
+| Native `Ref` on 15 child tables | Auto-generates 15 `REF_ROWS()` VCs on Parent | Use `Enum` (Base Type: `Ref`) for utility links (community-reported; [thread](https://discuss.google.dev/t/use-enum-enumlist-base-type-ref-to-de-reference-data-reduce-reverse-reference-clutter/65850)) | Suppresses unwanted VCs. Caveats: not compatible with interactive dashboards, needs Valid_If or suggested values |
 
 ### Google Sheets Multi-User Concurrency & Missing Rows Prevention
 | Root Cause of Missing Rows | Mechanism | Required Fix |
 | :--- | :--- | :--- |
-| **Premature Browser/App Closure** | Offline sync queue in IndexedDB dropped before sending | Turn OFF `Delayed Sync`; wait for sync spinner |
-| **API `appendCells` Index Lag** | Google Sheets lacks row-level ACID write locks | For >10 concurrent active field writers, migrate to **Cloud SQL** |
-| **Ghost Cells in Trailing Grid Rows** | Formulas/borders in empty rows fool AppSheet to write at row 1000+ | Delete empty rows; use `ARRAYFORMULA` in Row 1 only |
+| **Premature Browser/App Closure** | Queued (Delayed) sync not yet sent when the app/browser is closed | Keep Delayed Sync on: the queue protects data. Tell users to wait for sync to finish before closing |
+| **Sheets Concurrency Limits** | Google Sheets lacks row-level write locks; it is the bottleneck under heavy concurrent writes (community-confirmed) | With many concurrent active writers, consider migrating to **Cloud SQL** (no documented threshold) |
+| **Ghost Cells in Trailing Grid Rows** (community-reported) | Formulas/borders in empty rows may make AppSheet write far below the data | Delete empty rows; use `ARRAYFORMULA` in Row 1 only |
 | **Post-Write Security Filter Mismatch** | Row written to Sheet but filtered out from app view by filter | Verify table Security Filter criteria |
-| **Key Collisions from `=MAX()+1`** | 2 users get same ID; 2nd user overwrites 1st user | Set Primary Key `Initial Value` strictly to **`UNIQUEID()`** |
+| **Key Collisions from `=MAX()+1`** (community-reported) | 2 users get same ID; 2nd user overwrites 1st user | Set Primary Key `Initial Value` strictly to **`UNIQUEID()`** |
 
 ## Common Mistakes & Anti-Patterns
 
@@ -79,19 +78,19 @@ When NOT to use:
 - ✅ **Right:** Apply a server-side **Security Filter** on the table (`[EmployeeEmail] = USEREMAIL()` or `LOOKUP(USEREMAIL(), "Users", "Email", "Role") = "HR_Admin"`).
 
 ### 2. Using `LOOKUP()` instead of Dereferencing
-- ❌ **Wrong:** `LOOKUP([CustomerRef], "Customers", "CustomerID", "Email")` (causes extra table scan)
-- ✅ **Right:** `[CustomerRef].[Email]` (uses pre-built relational index instantly)
+- ❌ **Wrong:** `LOOKUP([_THISROW].[CustomerRef], "Customers", "CustomerID", "Email")` (LOOKUP wraps `ANY(SELECT(...))`, so it queries the table)
+- ✅ **Right:** `[CustomerRef].[Email]` (simpler and the recommended pattern)
 
 ### 3. Circular Security Filter Deadlock (Anti-Pattern F4)
-- ❌ **Wrong:** Referencing a Slice inside the Security Filter of the same table (`IN([ID], ActiveSlice[ID])`) $\to$ causes recursive macro-expansion compiler loop and 120s sync timeout.
+- ❌ **Wrong:** Referencing a Slice inside the Security Filter of the same table (`IN([ID], ActiveSlice[ID])`) $\to$ community reports self-referencing security filters can fail to load or sync very slowly (not an official rule; one answer says slices work). Treat as a risk to avoid.
 - ✅ **Right:** Reference the physical column condition directly in the Security Filter (`[Status] = "Active"`).
 
 ### 4. Hidden Address Geocoding Tax (Anti-Pattern H1)
-- ❌ **Wrong:** Leaving columns as `Address` on 10k+ row tables (triggers hidden `[internal] GeoCodeAddressColumn` that re-geocodes every row on every sync).
+- ❌ **Wrong:** Leaving columns as `Address` on 10k+ row tables (one community post reports a hidden `[internal] GeoCodeAddressColumn` slowing sync on a large table; official docs say geocoding results are cached, so measure before changing; turning off the geocoding toggle is an alternative).
 - ✅ **Right:** Convert to `Text` with a Maps URL Action or pre-compute `LatLong` once on write.
 
 ### 5. Breaking SQL Pushdown in Security Filters
-- ❌ **Wrong:** `OR([Status] = "Active", LEN([Title]) > 10)` in SQL security filters (forces AppSheet to fetch millions of rows and filter in memory).
+- ❌ **Wrong:** `OR([Status] = "Active", LEN([Title]) > 10)` in SQL security filters (the official docs advise avoiding complex `NOT()`/`OR()` on SQL sources; unconvertible filters may be partly evaluated server-side after fetching more rows).
 - ✅ **Right:** Use pushdown-compatible expressions: `AND([Status] = "Active", [AssignedTo] = USEREMAIL())`.
 
 ## Reference Guides & Tools
@@ -104,6 +103,7 @@ For complete specifications, syntax details, tools, and real-world examples, con
 - [Performance, Sync & Scalability Guide](references/performance-optimization.md) — Sync lifecycle breakdown, heavy compute expression catalog & fast alternatives, `Enum (Base Type Ref)` optimization to suppress `REF_ROWS()` virtual columns, SQL pushdown rules, empirical plan thresholds, Address geocoding tax, and view rendering limits.
 - [AppSheet Copilot & Assistant Extension Changeset Spec](references/extension-changeset.md) — Strict-JSON changeset specification (`{"changes": [...]}`) for programmatic DOM automation via the AppSheet Assistant / Copilot Chrome extension.
 - [Documentation Export Parser Tool](scripts/parse_appdoc.py) — Python script to parse, denoise, and analyze 100k+ line AppSheet Documentation exports (`summary.md`, `app.json`, VC leaderboards, workbook write-contention indicators).
+- [Build Reference: Views, Column Types, Actions, Limits, AI](references/build-reference.md)
 - [Data Modeling & Architecture](references/data-modeling.md) — Relational schema design, Key vs Label rules, Ref columns vs Enum Base Type Ref, Virtual Columns, Slices, and Security Filters.
 - [Security, Authentication & Access Control](references/security-and-access.md) — Authentication providers, Server-side Security Filters, Role-Based Access Control (RBAC), column permissions (`Editable_If`, `Show_If`), circular deadlock prevention, and cross-app bot execution boundaries.
 - [Automation, Bots & Webhooks](references/automation-patterns.md) — Event triggers, bot tasks (Email, Webhook, Apps Script, PDF/CSV generation), and template formatting tags.

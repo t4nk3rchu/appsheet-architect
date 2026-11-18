@@ -22,21 +22,17 @@ Comprehensive guide to implementing secure, enterprise-grade Google AppSheet app
 AppSheet relies on federated identity providers rather than maintaining internal username/password registries.
 
 ### Supported Identity Providers
-- **Google Workspace / Gmail** (Default for Google Drive / Google Sheets apps)
-- **Microsoft Entra ID (Office 365 / Azure AD)**
-- **Okta** (Enterprise SAML / OIDC integration)
-- **AWS Cognito**
-- **Apple ID**
-- **OpenID Connect (OIDC)** (Custom enterprise single sign-on)
+The *Require sign-in* provider list offers: **Apple, Box, Dropbox, Google, Microsoft, Salesforce, Smartsheet, Any**.
+- Okta, AWS Cognito, and OpenID Connect (OIDC) are configured through **Domain Authentication** (account auth domains), not the provider list.
 
 ### Sign-In Configuration Options
 1. **Require User Authentication:**
-   - Location: `Security > Require Sign-In` -> Enable `Require user authentication`.
+   - Location: `Security > Require Sign-In` -> Enable `Require user sign-in?`.
    - Populates `USEREMAIL()` and enables user allowlists, domain authentication, and security filters.
 2. **User Allow-List vs Domain Authentication:**
-   - **Allow-list:** Specific email addresses authorized in `Manage > Users > People to invite`.
+   - **Allow-list:** Specific email addresses authorized via the app sharing dialog (exact path unverified).
    - **Domain Authentication:** Authorize an entire domain (e.g. `@acme-corp.com`).
-   - **Domain Groups as Custom Roles:** Sync Active Directory, Google Groups, or Okta groups directly into AppSheet user roles.
+   - **Domain Groups as Custom Roles:** Group sync into roles is unverified; OIDC groups cannot be used as custom roles.
 3. **App Execution Modes:**
    - **`as app creator` (Default & Recommended):** AppSheet accesses cloud data using the app creator's cloud storage credentials. Users do NOT need direct read/write access to the backend Google Sheet or SQL database.
    - **`as app user`:** AppSheet executes queries with the signed-in user's individual cloud storage credentials. Requires granting backend access to all end users.
@@ -54,7 +50,7 @@ AppSheet relies on federated identity providers rather than maintaining internal
 | Feature | Execution Location | Data Transmitted to Device? | True Security Boundary? | Primary Use Case |
 | :--- | :--- | :--- | :--- | :--- |
 | **Security Filter** | **AppSheet Server / SQL Database** | ❌ **NO** (Filtered before transmission) | ✅ **YES** | Multi-tenant isolation, confidential HR/salary data, GDPR |
-| **Table Update Mode** | **AppSheet Server** | N/A (Server enforces mutations) | ✅ **YES** | Restricting Adds, Edits, Deletes by role |
+| **Table Update Mode** | **AppSheet Server** (unverified in official docs) | N/A | Unverified | Restricting Adds, Edits, Deletes by role |
 | **Slice** | Client Browser / Mobile | ✅ **YES** (All records downloaded) | ❌ **NO** | Workflow views, stage filtering, tab navigation |
 | **Show_If / Hide** | Client Browser / Mobile | ✅ **YES** (Column data in memory) | ❌ **NO** | Dynamic form layouts, conditional UI steps |
 
@@ -206,14 +202,13 @@ For multi-tenant SaaS applications:
   ```http
   ApplicationAccessKey: V2-abc123YourSecureSecretKey
   ```
-- If an access key is compromised, regenerate it immediately in `Manage > Integrations > Inbound API`.
+- If an access key is compromised, regenerate it immediately in `Settings > Integrations`.
 
 ### Inbound Webhook Security
-- **IP Allowlisting:** Restrict API and database access to Google AppSheet egress IP ranges.
-- **Payload Verification:** Verify HMAC signature headers on external webhook endpoints to ensure requests originated from AppSheet.
+- **IP Allowlisting:** Unverified; no official static AppSheet egress IP list was found.
+- **Payload Verification:** AppSheet does not document webhook payload signing. Authenticate with a secret custom header you set on the webhook task and validate it at your endpoint.
 
 ### Sensitive Data & PII Handling
-- Use the **`SecureImage`** column type for sensitive images (generates short-lived, signed URLs that expire automatically).
 - Do not store unencrypted passwords, credit card numbers, or government IDs in plain text fields.
 
 ---
@@ -228,18 +223,18 @@ AppSheet Enterprise administrators can enforce centralized governance policies a
 - **Allowed Connectors:** Restrict which database connectors (e.g. BigQuery, SQL Server) creators can connect to.
 
 ### Audit History & Compliance Logging
-Every data add, update, delete, API call, and workflow trigger is permanently logged in the **Audit History** (`Manage > Monitor > Audit History`).
-- Records include: Timestamp, User Email, Client IP, Operation Type, Target Table, Record Key, and Diff (Before vs After state).
-- **BigQuery Audit Export:** For compliance and SIEM security monitoring, stream AppSheet Audit Logs directly into Google BigQuery.
+Every data add, update, delete, API call, and workflow trigger is logged in the **Audit History** (`Manage > Monitor > Audit History`). Retention is 7 days (53 days on Enterprise Plus), so export for longer-term needs.
+- Exact record fields (e.g. client IP, before/after diff) are unverified.
+- **BigQuery Audit Export:** Team-level export of audit logs to BigQuery (roughly hourly, `audit_log_export` table) for compliance and SIEM monitoring.
 
 ---
 
 ## 8. Circular Security Filter Deadlock Prevention (Anti-Pattern F4)
 
 > [!CAUTION]
-> **Never reference a Slice in the Security Filter of the table that the slice is built upon.**
+> **Avoid referencing a Slice in the Security Filter of the table that the slice is built upon.** (Community-reported guidance; no official AppSheet rule found, and reports conflict.)
 
-### The Failure Mechanism:
+### The Reported Failure Mechanism (unverified):
 When AppSheet evaluates a Security Filter on Table `A`, it macro-expands any referenced Slice expressions. If the Security Filter on Table `A` contains a formula like:
 ```appsheet
 // ❌ DEADLOCK TRAP on Table 'Orders':
@@ -248,7 +243,7 @@ IN([OrderID], ActiveOrdersSlice[OrderID])
 1. AppSheet tries to load Table `Orders` $\to$ evaluates its Security Filter.
 2. The Security Filter queries `ActiveOrdersSlice`.
 3. `ActiveOrdersSlice` requires Table `Orders` to be loaded first.
-4. **Result:** Infinite recursive expansion or compiler loop $\to$ Sync Timeout (120s+ freeze) and silent mutation errors on initial load.
+4. **Result:** Infinite recursive expansion or compiler loop $\to$ sync timeouts/failure to load and silent mutation errors on initial load.
 
 ### Proper Architecture:
 Always reference the underlying physical column condition or a lookup to an independent `Users` / `Roles` table directly in the security filter:
@@ -271,5 +266,5 @@ In enterprise multi-module deployments, developers frequently deploy a **Hub Mod
 > - **App B's** Bots will **NOT** trigger, even though the row was written to the shared database.
 
 ### Multi-App Automation Solutions:
-1. **AppSheet API Webhook Tasks:** When App A adds an order, have App A execute an AppSheet REST API Webhook task calling App B's inbound endpoint to trigger downstream workflow automation.
-2. **Database Triggers / Cloud Functions:** For database-level multi-app synchronization, use Cloud SQL triggers or Google Apps Script `onEdit` triggers independent of individual app sessions.
+1. **AppSheet API Webhook Tasks (community-reported to trigger App B's bots; official docs say app events fire for changes made via API calls):** When App A adds an order, have App A execute an AppSheet REST API Webhook task calling App B's inbound endpoint to trigger downstream workflow automation.
+2. **Database Triggers / Cloud Functions:** For database-level multi-app synchronization, use database-level triggers or Cloud Functions. Direct source edits (e.g. Apps Script `onEdit`) do not fire AppSheet bots; they would need to call the AppSheet API.

@@ -13,9 +13,9 @@ AppSheet automations follow an event-driven pattern:
 ```
 
 - **Bot**: The top-level automation container linking an Event to a Process.
-- **Event**: Defines *when* the automation runs (Data Change, Schedule, or Webhook).
+- **Event**: Defines *when* the automation runs (App data change, Scheduled, AppSheet database, Google Chat, Google Forms, or Gmail). "Webhook" is a task, not an event type.
 - **Process**: Defines the sequence of steps and conditional logic.
-- **Task**: The specific action executed (Email, Notification, Webhook, Document, Data Action, Apps Script).
+- **Task**: The specific action executed (Email, Notification, SMS, Webhook, Create a file, Call a script, Chat message). Data actions run as a process step.
 
 ---
 
@@ -23,11 +23,10 @@ AppSheet automations follow an event-driven pattern:
 
 ### 2.1 Data Change Events
 Triggers when records in a specified table are modified:
-- **`Adds only`**: Runs when a new row is created.
-- **`Updates only`**: Runs when an existing row is edited.
-- **`Deletes only`**: Runs when a row is removed.
-- **`Adds and Updates`**: Runs on create or update.
-- **`All changes`**: Runs on create, update, or delete.
+Select any combination of **Adds**, **Updates**, and **Deletes** (exact option labels may vary by editor version):
+- Adds: runs when a new row is created.
+- Updates: runs when an existing row is edited.
+- Deletes: runs when a row is removed.
 
 #### Change Detection Expression Patterns
 To prevent bots from firing repeatedly on unrelated edits, use change comparison expressions:
@@ -46,10 +45,10 @@ AND(
 
 ### 2.2 Scheduled Events
 Triggers periodically based on a time schedule:
-- **Schedule Cadence**: Daily, Weekly, Monthly, or Hourly.
+- **Schedule Cadence**: Daily, Weekly, Monthly (custom cron also reported; hourly cadence unverified).
 - **Timezone**: Explicit timezone setting (e.g. `America/Los_Angeles`).
 - **Execution Mode**:
-  - **Single Run**: Runs once per scheduled time (useful for summary reports).
+  - **Single run** (label unverified): Runs once per scheduled time (useful for summary reports).
   - **For Each Row in Table**: Iterates across every row in the table matching a filter condition.
 
 #### Scheduled Filter Expression Pattern
@@ -74,21 +73,21 @@ AND(
 
 ### 3.2 Call a Webhook
 - **URL**: Target REST endpoint URL.
-- **HTTP Method**: `POST`, `PUT`, `PATCH`, `DELETE`.
+- **HTTP Method**: `GET`, `GET`, `POST`, `PUT`, `PATCH`, `DELETE`.
 - **HTTP Headers**: e.g. `Authorization: Bearer {token}`, `Content-Type: application/json`.
 - **JSON Body Template**: Custom JSON payload embedding AppSheet fields.
 
-### 3.3 Create a File (PDF / CSV / HTML / JSON)
+### 3.3 Create a File (PDF / Excel / CSV / HTML)
 - **Output Folder**: Google Drive / Cloud Storage folder path.
 - **File Name Prefix**: Formula: `CONCATENATE("Invoice_", [InvoiceID], "_", TEXT(TODAY(), "YYYYMMDD"))`.
-- **File Format**: `PDF`, `CSV`, `HTML`, `JSON`, `XML`.
+- **File Format**: `PDF`, `XLSX`, `CSV`, `HTML` (JSON/XML unverified).
 - **Page Settings**: Portrait/Landscape, Page Size (Letter, A4), Margins.
 
 ### 3.4 Run a Data Action
 - Executes actions such as updating values in another table, adding new rows to a related table, or setting a timestamp.
 
 ### 3.5 Call Google Apps Script
-- Binds to an Apps Script project deployed as API executable.
+- Uses the Apps Script connector: the task calls a script function with arguments given as expressions.
 - Passes typed arguments and receives return values to update the active record.
 
 ---
@@ -136,8 +135,8 @@ Site Photo:
 ## 5. Troubleshooting & Debugging Bots
 
 1. **Audit History Log**:
-   - Access via *Manage > Monitor > Audit History*.
-   - Filter by `Bot Name` or `Event Type` to inspect step-by-step execution payloads, error codes, and variable values.
+   - Access via *Manage > Monitor > Audit History* (retention 7 days; 53 on Enterprise Plus).
+   - Filtering options are unverified; use it to inspect step-by-step execution payloads, error codes, and variable values.
 2. **Test Button**:
    - Use the **Test** button in the Bot editor to run simulated executions against selected sample rows.
 3. **Bypass Rules**:
